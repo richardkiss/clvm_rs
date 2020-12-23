@@ -1,5 +1,6 @@
 name: Tests
 
+
 on:
   push:
     branches: [ main ]
@@ -11,6 +12,7 @@ jobs:
     strategy:
       matrix:
         os: [ ubuntu-16.04, ubuntu-20.04, macos-11.0, macos-10.15 ]
+        python-version: [ '3.7', '3.8', '3.9' ]
     name: Tests
     steps:
       - uses: actions/checkout@v2
@@ -19,7 +21,7 @@ jobs:
       - name: Setup python
         uses: actions/setup-python@v1
         with:
-          python-version: 3.8
+          python-version: ${{ matrix.python-version }}
           architecture: x64
       - name: Python environment
         run: python3 -m venv env
@@ -29,7 +31,6 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install maturin
           python3 -m pip install pytest
-          python3 -m pip install blspy
       - name: clone clvm
         run: |
           . ./env/bin/activate
@@ -45,7 +46,8 @@ jobs:
       - name: Build
         run: |
           . ./env/bin/activate
-          maturin develop
+          maturin develop --release
+          maturin build --release
       - name: Test
         run: |
           . ./env/bin/activate
