@@ -45,13 +45,13 @@ jobs:
           #      uses: mxschmitt/action-tmate@v3
 
     - name: Build with maturin
-      run: maturin build --release
+      run: maturin build --release --manylinux 2010
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v1
       with:
         name: wheels
-        path: ./dist
+        path: ./target/wheels
     - name: Install twine
       run: pip install twine
     - name: Publish distribution to Test PyPI
@@ -60,11 +60,11 @@ jobs:
         TWINE_USERNAME: __token__
         TWINE_NON_INTERACTIVE: 1
         TWINE_PASSWORD: ${{ secrets.test_pypi_password }}
-      run: twine upload --non-interactive --skip-existing --verbose 'dist/*'
+      run: twine upload --non-interactive --skip-existing --verbose 'target/wheels/*'
     - name: Publish distribution to PyPI
       if: startsWith(github.event.ref, 'refs/tags')
       env:
         TWINE_USERNAME: __token__
         TWINE_NON_INTERACTIVE: 1
         TWINE_PASSWORD: ${{ secrets.pypi_password }}
-      run: twine upload --non-interactive --skip-existing --verbose 'dist/*'
+      run: twine upload --non-interactive --skip-existing --verbose 'target/wheels/*'
