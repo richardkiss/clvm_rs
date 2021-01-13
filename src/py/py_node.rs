@@ -62,7 +62,12 @@ impl PyNode {
             if let Ok(r) = n {
                 r
             } else {
-                extract_tuple(&allocator, obj)?
+                let n = extract_tuple(&allocator, obj);
+                if let Ok(r) = n {
+                    r
+                } else {
+                    extract_node(&allocator, obj)?
+                }
             }
         };
         Ok(node)
