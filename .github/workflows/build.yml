@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-18.04, windows-latest]
+        os: [windows-latest] #[macos-latest, ubuntu-18.04, windows-latest]
 
     steps:
     - uses: actions/checkout@v1
@@ -53,51 +53,56 @@ jobs:
 
     - name: Install clvm_rs into venv for tests
       run: |
-        . activate
-        maturin develop --release
+        . ./activate
+        echo $VIRTUAL_ENV
+        python -m pip install maturin
+        # maturin develop --release
+
+    - name: Setup tmate session
+      uses: mxschmitt/action-tmate@v3
 
     - name: Install dependencies
       run: |
-          . activate
+          . ./activate
           python -m pip install pytest
           python -m pip install blspy
 
     - name: Ensure clvm_rs is installed
       run: |
-        . activate
+        . ./activate
         python -c 'import clvm_rs'
 
     - name: install clvm
       run: |
-        . activate
+        . ./activate
         git clone https://github.com/Chia-Network/clvm.git --branch=use_clvm_rs --single-branch
         python -m pip install ./clvm
 
     - name: install clvm_tools
       run: |
-        . activate
+        . ./activate
         git clone https://github.com/Chia-Network/clvm_tools.git --branch=develop --single-branch
         python -m pip install ./clvm_tools
 
     - name: Ensure clvm is installed
       run: |
-        . activate
+        . ./activate
         python -c 'import clvm'
 
     - name: Ensure clvm_tools is installed
       run: |
-        . activate
+        . ./activate
         python -c 'import clvm_tools'
 
     - name: Run tests from clvm
       run: |
-        . activate
+        . ./activate
         cd clvm
         python -m py.test tests
 
     - name: Run tests from clvm_tools
       run: |
-        . activate
+        . ./activate
         cd clvm_tools
         python -m py.test tests
 
