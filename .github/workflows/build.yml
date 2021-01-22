@@ -9,13 +9,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest] #[macos-latest, ubuntu-18.04, windows-latest]
+        os: [macos-latest, ubuntu-18.04, windows-latest]
 
     steps:
+
     - uses: actions/checkout@v1
       with:
-        fetch-depth: 0
-        # we need fetch-depth 0 so setuptools_scm can resolve tags
+        fetch-depth: 1
+
     - uses: actions/setup-python@v1
       name: Install Python
       with:
@@ -45,11 +46,21 @@ jobs:
         path: ./target/wheels/
 
     - name: Create python venv
+      if: matrix.os != 'windows-latest'
       run: |
         python -m venv venv
-        ln -s venv/*/activate
-        # on Mac/Linux the path is `venv/bin/activate`
-        # on win32 the path is `venv/Scripts/activate`
+        ln -s venv/bin/activate
+        . ./activate
+        maturin develop --release
+
+    - name: Install wheel on windows
+      if: matrix.os == 'windows-latest'
+      run: |
+        echo ${env:PATH}
+        python -m venv venv
+        echo "" > activate
+        # on win32, `activate` is blank
+        python -m pip install target/wheels/clvm_rs-0.1.0-cp38-none-win_amd64.whl
 
     - name: Install clvm_rs into venv for tests
       run: |
@@ -58,41 +69,28 @@ jobs:
         python -m pip install maturin
         # maturin develop --release
 
-    - name: Setup tmate session
-      uses: mxschmitt/action-tmate@v3
-
     - name: Install dependencies
       run: |
           . ./activate
           python -m pip install pytest
           python -m pip install blspy
 
-    - name: Ensure clvm_rs is installed
-      run: |
-        . ./activate
-        python -c 'import clvm_rs'
-
-    - name: install clvm
+    - name: install clvm & clvm_tools
       run: |
         . ./activate
         git clone https://github.com/Chia-Network/clvm.git --branch=use_clvm_rs --single-branch
         python -m pip install ./clvm
 
-    - name: install clvm_tools
-      run: |
-        . ./activate
         git clone https://github.com/Chia-Network/clvm_tools.git --branch=develop --single-branch
         python -m pip install ./clvm_tools
 
-    - name: Ensure clvm is installed
+    - name: Ensure clvm, clvm_rs, clvm_tools are installed
       run: |
         . ./activate
         python -c 'import clvm'
-
-    - name: Ensure clvm_tools is installed
-      run: |
-        . ./activate
-        python -c 'import clvm_tools'
+        python -c 'import clvm; print(clvm.__file__)'
+        python -c 'import clvm_rs; print(clvm_rs.__file__)'
+        python -c 'import clvm_tools; print(clvm_tools.__file__)'
 
     - name: Run tests from clvm
       run: |
