@@ -105,6 +105,11 @@ jobs:
         cd clvm_tools
         python -m py.test tests
 
+    - name: publish
+      env:
+        MATURIN_PASSWORD: ${{ secrets.test_pypi_password }}
+      run: maturin publish --manylinux 2010 --username __token__ --repository-url https://test.pypi.org/legacy/
+
   checks:
     runs-on: ubuntu-20.04
     name: Checks
@@ -133,8 +138,7 @@ jobs:
       - name: Install rust
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: nightly
-            override: true
+            toolchain: stable
             components: rustfmt, clippy
       - name: cargo test
         run: cargo test --no-default-features
