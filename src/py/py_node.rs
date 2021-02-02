@@ -71,6 +71,15 @@ impl From<ArcSExp> for PyNode {
     }
 }
 
+impl ToPyObject for ArcSExp {
+    fn to_object(&self, py: Python<'_>) -> PyObject {
+        let pynode: PyNode = self.into();
+        let pynode: &PyCell<PyNode> = PyCell::new(py, pynode).unwrap();
+        let pa: &PyAny = &pynode;
+        pa.to_object(py)
+    }
+}
+
 #[pymethods]
 impl PyNode {
     #[new]
