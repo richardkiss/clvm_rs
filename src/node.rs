@@ -82,6 +82,10 @@ impl<'a, T: Allocator> Node<'a, T> {
             self.null()
         }
     }
+
+    pub fn ptr(&self) -> T::Ptr {
+        self.node.clone()
+    }
 }
 
 impl<'a, T: Allocator> PartialEq for Node<'a, T> {

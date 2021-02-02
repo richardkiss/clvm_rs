@@ -58,29 +58,37 @@ impl NativeOpLookup {
         op: &[u8],
         argument_list: &ArcSExp,
     ) -> Result<Reduction<ArcSExp>, EvalErr<ArcSExp>> {
-        self.nol.operator_handler(allocator, op, argument_list)
+        let node = Node::new(allocator, argument_list.clone());
+        self.nol.operator_handler(op, &node)
+    }
+}
+
+impl ToPyObject for Node<'_, ArcAllocator> {
+    fn to_object(&self, py: Python<'_>) -> PyObject {
+        self.ptr().to_object(py)
     }
 }
 
 impl INativeOpLookup {
-    pub fn operator_handler(
+    pub fn operator_handler<'p>(
         &self,
-        allocator: &ArcAllocator,
         op: &[u8],
-        argument_list: &<ArcAllocator as Allocator>::Ptr,
+        argument_list: &Node<'p, ArcAllocator>,
     ) -> Result<
         Reduction<<ArcAllocator as Allocator>::Ptr>,
         EvalErr<<ArcAllocator as Allocator>::Ptr>,
-    > {
+    >
+    where
+        Node<'p, ArcAllocator>: ToPyObject,
+    {
         if op.len() == 1 {
             if let Some(f) = self.f_lookup[op[0] as usize] {
-                let node_t: Node<ArcAllocator> = Node::new(allocator, argument_list.clone());
-                return f(&node_t);
+                return f(argument_list);
             }
         }
 
         Python::with_gil(|py| {
-            let pynode: PyNode = argument_list.into();
+            let pynode: PyObject = argument_list.to_object(py);
             let r1 = self.py_callback.call1(py, (op, pynode));
             match r1 {
                 Err(pyerr) => {
@@ -88,7 +96,7 @@ impl INativeOpLookup {
                     match ee {
                         Err(_x) => {
                             println!("{:?}", _x);
-                            Err(EvalErr(argument_list.clone(), "internal error".to_string()))
+                            Err(EvalErr(argument_list.ptr(), "internal error".to_string()))
                         }
                         Ok(ee) => Err(ee),
                     }
