@@ -41,8 +41,8 @@ impl NativeOpLookup {
     }
 }
 
-impl<'a> FromPyObject<'a> for ArcSExp {
-    fn extract(obj: &'a PyAny) -> PyResult<Self> {
+impl FromPyObject<'_> for ArcSExp {
+    fn extract(obj: &PyAny) -> PyResult<Self> {
         let sexp_ptr: PyRef<PyNode> = obj.extract()?;
         let node: ArcSExp = (&sexp_ptr as &PyNode).into();
         Ok(node)
@@ -100,8 +100,8 @@ fn to_result<'n, 'p>(
 where
     Node<'n, ArcAllocator>: ToPyObject,
 {
-    // This code is very ugly because there are many places where we can get an error.
-    // So let's call out to `unwrap_or_eval_err` in some of those places
+    // There are many places where we can get an error.
+    // Call out to `unwrap_or_eval_err` in those places.
 
     match obj {
         Err(pyerr) => Err(unwrap_or_eval_err(
@@ -110,12 +110,11 @@ where
             "unexpected exception",
         )?),
         Ok(o) => {
-            let pair: &PyTuple = unwrap_or_eval_err(o.extract(py), node, "not a tuple")?;
-            let i0: u32 = unwrap_or_eval_err(pair.get_item(0).extract(), node, "not a u32")?;
-            let n: <ArcAllocator as Allocator>::Ptr =
-                unwrap_or_eval_err(pair.get_item(1).extract(), node, "not a node")?;
-            let r: Reduction<<ArcAllocator as Allocator>::Ptr> = Reduction(i0, n);
-            Ok(r)
+            let pair: &PyTuple = unwrap_or_eval_err(o.extract(py), node, "expected tuple")?;
+            let i0: u32 = unwrap_or_eval_err(pair.get_item(0).extract(), node, "expected u32")?;
+            let node: <ArcAllocator as Allocator>::Ptr =
+                unwrap_or_eval_err(pair.get_item(1).extract(), node, "expected node")?;
+            Ok(Reduction(i0, node))
         }
     }
 }
