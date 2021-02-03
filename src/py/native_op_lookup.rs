@@ -13,13 +13,13 @@ use pyo3::types::{PyString, PyTuple};
 #[pyclass]
 #[derive(Clone)]
 pub struct NativeOpLookup {
-    nol: INativeOpLookup,
+    nol: INativeOpLookup<ArcAllocator>,
 }
 
 #[derive(Clone)]
-struct INativeOpLookup {
+struct INativeOpLookup<A: Allocator> {
     py_callback: PyObject,
-    f_lookup: FLookup<ArcAllocator>,
+    f_lookup: FLookup<A>,
 }
 
 #[pymethods]
@@ -42,14 +42,6 @@ impl NativeOpLookup {
     }
 }
 
-impl FromPyObject<'_> for ArcSExp {
-    fn extract(obj: &PyAny) -> PyResult<Self> {
-        let sexp_ptr: PyRef<PyNode> = obj.extract()?;
-        let node: ArcSExp = (&sexp_ptr as &PyNode).into();
-        Ok(node)
-    }
-}
-
 impl<A: Allocator> ToPyObject for Node<'_, A>
 where
     A::Ptr: ToPyObject,
@@ -59,8 +51,16 @@ where
     }
 }
 
-fn eval_err_for_pyerr<'a, 'p, A: Allocator, T>(
-    _node: &Node<'a, A>,
+impl<'p> FromPyObject<'p> for ArcSExp {
+    fn extract(obj: &PyAny) -> PyResult<Self> {
+        let sexp_ptr: PyRef<PyNode> = obj.extract()?;
+        let node: ArcSExp = (&sexp_ptr as &PyNode).into();
+        Ok(node)
+    }
+}
+
+fn eval_err_for_pyerr<'p, A: Allocator, T>(
+    _node: &Node<'_, A>,
     py: Python<'p>,
     pyerr: &'p PyErr,
 ) -> PyResult<EvalErr<T>>
@@ -68,13 +68,12 @@ where
     T: FromPyObject<'p>,
 {
     let be: &PyBaseException = pyerr.pvalue(py);
-    let node: T = {
-        let sexp: &PyAny = be.getattr("_sexp")?;
-        sexp.extract()?
-    };
+    let sexp: &PyAny = be.getattr("_sexp")?;
+    let node: T = sexp.extract()?;
 
-    let args: &'p PyTuple = pyerr.pvalue(py).getattr("args")?.extract()?;
-    let arg0: &'p PyString = args.get_item(0).extract()?;
+    let args: &PyAny = be.getattr("args")?;
+    let args: &PyTuple = args.extract()?;
+    let arg0: &PyString = args.get_item(0).extract()?;
     let s: &str = arg0.to_str()?;
     let s: String = s.to_string();
     Ok(EvalErr(node, s))
@@ -103,7 +102,7 @@ impl NativeOpLookup {
     }
 }
 
-impl<'p> INativeOpLookup {
+impl<'p> INativeOpLookup<ArcAllocator> {
     pub fn operator_handler(
         &self,
         op: &[u8],
@@ -128,7 +127,7 @@ impl<'p> INativeOpLookup {
 
             match r1 {
                 Err(pyerr) => {
-                    let eval_err = eval_err_for_pyerr(&node, py, &pyerr);
+                    let eval_err: PyResult<EvalErr<<ArcAllocator as Allocator>::Ptr>> = eval_err_for_pyerr(&node, py, &pyerr);
                     Err(unwrap_or_eval_err(eval_err, &node, "unexpected exception")?)
                 }
                 Ok(o) => {
