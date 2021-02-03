@@ -6,6 +6,7 @@ use super::arc_allocator::{ArcAllocator, ArcSExp};
 use super::f_table::{opcode_by_name, FLookup};
 use super::py_node::PyNode;
 
+use pyo3::exceptions::PyBaseException;
 use pyo3::prelude::*;
 use pyo3::types::{PyString, PyTuple};
 
@@ -58,14 +59,24 @@ where
     }
 }
 
-fn eval_err_for_pyerr<'p, T>(py: Python<'p>, pyerr: &'p PyErr) -> PyResult<EvalErr<T>>
+fn eval_err_for_pyerr<'a, 'p, A: Allocator, T>(
+    _node: &Node<'a, A>,
+    py: Python<'p>,
+    pyerr: &'p PyErr,
+) -> PyResult<EvalErr<T>>
 where
     T: FromPyObject<'p>,
 {
+    let be: &PyBaseException = pyerr.pvalue(py);
+    let node: T = {
+        let sexp: &PyAny = be.getattr("_sexp")?;
+        sexp.extract()?
+    };
+
     let args: &'p PyTuple = pyerr.pvalue(py).getattr("args")?.extract()?;
     let arg0: &'p PyString = args.get_item(0).extract()?;
-    let s: String = arg0.to_str()?.to_string();
-    let node: T = pyerr.pvalue(py).getattr("_sexp")?.extract()?;
+    let s: &str = arg0.to_str()?;
+    let s: String = s.to_string();
     Ok(EvalErr(node, s))
 }
 
@@ -92,33 +103,6 @@ impl NativeOpLookup {
     }
 }
 
-fn to_result<'n, 'p, A: Allocator>(
-    py: Python<'p>,
-    obj: &'p PyResult<PyObject>,
-    node: &Node<'n, A>,
-) -> Result<Reduction<<A as Allocator>::Ptr>, EvalErr<<A as Allocator>::Ptr>>
-where
-    Node<'n, A>: ToPyObject,
-    <A as Allocator>::Ptr: FromPyObject<'p>,
-{
-    // There are many places where we can get an error.
-    // Call out to `unwrap_or_eval_err` in those places.
-
-    match obj {
-        Err(pyerr) => Err(unwrap_or_eval_err(
-            eval_err_for_pyerr(py, &pyerr),
-            node,
-            "unexpected exception",
-        )?),
-        Ok(o) => {
-            let pair: &PyTuple = unwrap_or_eval_err(o.extract(py), node, "expected tuple")?;
-            let i0: u32 = unwrap_or_eval_err(pair.get_item(0).extract(), node, "expected u32")?;
-            let node: <A as Allocator>::Ptr = unwrap_or_eval_err(pair.get_item(1).extract(), node, "expected node")?;
-            Ok(Reduction(i0, node))
-        }
-    }
-}
-
 impl<'p> INativeOpLookup {
     pub fn operator_handler(
         &self,
@@ -140,7 +124,23 @@ impl<'p> INativeOpLookup {
         Python::with_gil(|py| {
             let pynode: PyObject = argument_list.to_object(py);
             let r1: PyResult<PyObject> = self.py_callback.call1(py, (op, pynode));
-            to_result(py, &r1, argument_list)
+            let node = argument_list;
+
+            match r1 {
+                Err(pyerr) => {
+                    let eval_err = eval_err_for_pyerr(&node, py, &pyerr);
+                    Err(unwrap_or_eval_err(eval_err, &node, "unexpected exception")?)
+                }
+                Ok(o) => {
+                    let pair: &PyTuple =
+                        unwrap_or_eval_err(o.extract(py), &node, "expected tuple")?;
+                    let i0: u32 =
+                        unwrap_or_eval_err(pair.get_item(0).extract(), &node, "expected u32")?;
+                    let node: <ArcAllocator as Allocator>::Ptr =
+                        unwrap_or_eval_err(pair.get_item(1).extract(), &node, "expected node")?;
+                    Ok(Reduction(i0, node))
+                }
+            }
         })
     }
 }
