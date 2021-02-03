@@ -70,8 +70,38 @@ impl ToPyObject for Node<'_, ArcAllocator> {
     }
 }
 
-impl INativeOpLookup {
-    pub fn operator_handler<'p>(
+fn to_result<'p>(
+    py: Python,
+    obj: &PyResult<PyObject>,
+    node: &Node<'_, ArcAllocator>,
+) -> Result<Reduction<<ArcAllocator as Allocator>::Ptr>, EvalErr<<ArcAllocator as Allocator>::Ptr>>
+where
+    Node<'p, ArcAllocator>: ToPyObject,
+{
+    match obj {
+        Err(pyerr) => {
+            let ee = eval_err_for_pyerr(py, &pyerr);
+            match ee {
+                Err(_x) => {
+                    println!("{:?}", _x);
+                    Err(EvalErr(node.ptr(), "internal error".to_string()))
+                }
+                Ok(ee) => Err(ee),
+            }
+        }
+        Ok(o) => {
+            let pair: &PyTuple = o.extract(py).unwrap();
+            let i0: u32 = pair.get_item(0).extract()?;
+            let i1: PyRef<PyNode> = pair.get_item(1).extract()?;
+            let n = i1.clone();
+            let r: Reduction<<ArcAllocator as Allocator>::Ptr> = Reduction(i0, n.into());
+            Ok(r)
+        }
+    }
+}
+
+impl<'p> INativeOpLookup {
+    pub fn operator_handler(
         &self,
         op: &[u8],
         argument_list: &Node<'p, ArcAllocator>,
@@ -90,27 +120,8 @@ impl INativeOpLookup {
 
         Python::with_gil(|py| {
             let pynode: PyObject = argument_list.to_object(py);
-            let r1 = self.py_callback.call1(py, (op, pynode));
-            match r1 {
-                Err(pyerr) => {
-                    let ee = eval_err_for_pyerr(py, &pyerr);
-                    match ee {
-                        Err(_x) => {
-                            println!("{:?}", _x);
-                            Err(EvalErr(argument_list.ptr(), "internal error".to_string()))
-                        }
-                        Ok(ee) => Err(ee),
-                    }
-                }
-                Ok(o) => {
-                    let pair: &PyTuple = o.extract(py).unwrap();
-                    let i0: u32 = pair.get_item(0).extract()?;
-                    let i1: PyRef<PyNode> = pair.get_item(1).extract()?;
-                    let n = i1.clone();
-                    let r: Reduction<<ArcAllocator as Allocator>::Ptr> = Reduction(i0, n.into());
-                    Ok(r)
-                }
-            }
+            let r1: PyResult<PyObject> = self.py_callback.call1(py, (op, pynode));
+            to_result(py, &r1, argument_list)
         })
     }
 }
