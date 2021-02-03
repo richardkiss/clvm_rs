@@ -41,13 +41,21 @@ impl NativeOpLookup {
     }
 }
 
-fn eval_err_for_pyerr(py: Python, pyerr: &PyErr) -> PyResult<EvalErr<ArcSExp>> {
+impl<'a> FromPyObject<'a> for ArcSExp {
+    fn extract(obj: &'a PyAny) -> PyResult<Self> {
+        let sexp_ptr: PyRef<PyNode> = obj.extract()?;
+        let node: ArcSExp = (&sexp_ptr as &PyNode).into();
+        Ok(node)
+    }
+}
+
+fn eval_err_for_pyerr<'a, T>(py: Python<'a>, pyerr: &'a PyErr) -> PyResult<EvalErr<T>>
+where
+    T: FromPyObject<'a>,
+{
     let args: &PyTuple = pyerr.pvalue(py).getattr("args")?.extract()?;
     let arg0: &PyString = args.get_item(0).extract()?;
-    let sexp: &PyCell<PyNode> = pyerr.pvalue(py).getattr("_sexp")?.extract()?;
-
-    let sexp_ptr: PyRef<PyNode> = sexp.try_borrow()?;
-    let node: ArcSExp = (&sexp_ptr as &PyNode).into();
+    let node: T = pyerr.pvalue(py).getattr("_sexp")?.extract()?;
     let s: String = arg0.to_str()?.to_string();
     Ok(EvalErr(node, s))
 }
