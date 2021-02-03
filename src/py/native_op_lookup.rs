@@ -49,6 +49,15 @@ impl<'a> FromPyObject<'a> for ArcSExp {
     }
 }
 
+impl<A: Allocator> ToPyObject for Node<'_, A>
+where
+    A::Ptr: ToPyObject,
+{
+    fn to_object(&self, py: Python<'_>) -> PyObject {
+        self.ptr().to_object(py)
+    }
+}
+
 fn eval_err_for_pyerr<'a, T>(py: Python<'a>, pyerr: &'a PyErr) -> PyResult<EvalErr<T>>
 where
     T: FromPyObject<'a>,
@@ -58,6 +67,17 @@ where
     let node: T = pyerr.pvalue(py).getattr("_sexp")?.extract()?;
     let s: String = arg0.to_str()?.to_string();
     Ok(EvalErr(node, s))
+}
+
+fn unwrap_or_eval_err<T, A: Allocator>(
+    obj: PyResult<T>,
+    node: &Node<'_, A>,
+    msg: &str,
+) -> Result<T, EvalErr<<A as Allocator>::Ptr>> {
+    match obj {
+        Err(_py_err) => Err(EvalErr(node.ptr(), msg.to_string())),
+        Ok(o) => Ok(o),
+    }
 }
 
 impl NativeOpLookup {
@@ -72,37 +92,29 @@ impl NativeOpLookup {
     }
 }
 
-impl ToPyObject for Node<'_, ArcAllocator> {
-    fn to_object(&self, py: Python<'_>) -> PyObject {
-        self.ptr().to_object(py)
-    }
-}
-
-fn to_result<'p>(
-    py: Python,
+fn to_result<'n, 'p>(
+    py: Python<'p>,
     obj: &PyResult<PyObject>,
-    node: &Node<'_, ArcAllocator>,
+    node: &Node<'n, ArcAllocator>,
 ) -> Result<Reduction<<ArcAllocator as Allocator>::Ptr>, EvalErr<<ArcAllocator as Allocator>::Ptr>>
 where
-    Node<'p, ArcAllocator>: ToPyObject,
+    Node<'n, ArcAllocator>: ToPyObject,
 {
+    // This code is very ugly because there are many places where we can get an error.
+    // So let's call out to `unwrap_or_eval_err` in some of those places
+
     match obj {
-        Err(pyerr) => {
-            let ee = eval_err_for_pyerr(py, &pyerr);
-            match ee {
-                Err(_x) => {
-                    println!("{:?}", _x);
-                    Err(EvalErr(node.ptr(), "internal error".to_string()))
-                }
-                Ok(ee) => Err(ee),
-            }
-        }
+        Err(pyerr) => Err(unwrap_or_eval_err(
+            eval_err_for_pyerr(py, &pyerr),
+            node,
+            "unexpected exception",
+        )?),
         Ok(o) => {
-            let pair: &PyTuple = o.extract(py).unwrap();
-            let i0: u32 = pair.get_item(0).extract()?;
-            let i1: PyRef<PyNode> = pair.get_item(1).extract()?;
-            let n = i1.clone();
-            let r: Reduction<<ArcAllocator as Allocator>::Ptr> = Reduction(i0, n.into());
+            let pair: &PyTuple = unwrap_or_eval_err(o.extract(py), node, "not a tuple")?;
+            let i0: u32 = unwrap_or_eval_err(pair.get_item(0).extract(), node, "not a u32")?;
+            let n: <ArcAllocator as Allocator>::Ptr =
+                unwrap_or_eval_err(pair.get_item(1).extract(), node, "not a node")?;
+            let r: Reduction<<ArcAllocator as Allocator>::Ptr> = Reduction(i0, n);
             Ok(r)
         }
     }
@@ -131,12 +143,5 @@ impl<'p> INativeOpLookup {
             let r1: PyResult<PyObject> = self.py_callback.call1(py, (op, pynode));
             to_result(py, &r1, argument_list)
         })
-    }
-}
-
-impl From<PyErr> for EvalErr<ArcSExp> {
-    fn from(_err: PyErr) -> Self {
-        let pyerr_node: ArcSExp = ArcAllocator::new().blob("PyErr");
-        EvalErr(pyerr_node, "bad type from python call".to_string())
     }
 }
