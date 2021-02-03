@@ -3,7 +3,7 @@ use crate::node::Node;
 use crate::reduction::{EvalErr, Reduction};
 
 use super::arc_allocator::{ArcAllocator, ArcSExp};
-use super::f_table::{make_f_lookup, FLookup};
+use super::f_table::{opcode_by_name, FLookup};
 use super::py_node::PyNode;
 
 use pyo3::prelude::*;
@@ -24,19 +24,20 @@ struct INativeOpLookup {
 #[pymethods]
 impl NativeOpLookup {
     #[new]
-    fn new(native_opcode_list: &[u8], unknown_op_callback: &PyAny) -> Self {
-        let native_lookup = make_f_lookup();
-        let mut f_lookup: FLookup<ArcAllocator> = [None; 256];
-        for i in native_opcode_list.iter() {
-            let idx = *i as usize;
-            f_lookup[idx] = native_lookup[idx];
-        }
+    fn new(unknown_op_callback: &PyAny) -> Self {
+        let f_lookup: FLookup<ArcAllocator> = [None; 256];
         NativeOpLookup {
             nol: INativeOpLookup {
                 py_callback: unknown_op_callback.into(),
                 f_lookup,
             },
         }
+    }
+
+    fn add_native(&mut self, opcode: u8, name: &str) -> PyResult<bool> {
+        let f = opcode_by_name(name);
+        self.nol.f_lookup[opcode as usize] = f;
+        Ok(f.is_some())
     }
 }
 
