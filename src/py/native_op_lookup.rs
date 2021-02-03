@@ -58,14 +58,14 @@ where
     }
 }
 
-fn eval_err_for_pyerr<'a, T>(py: Python<'a>, pyerr: &'a PyErr) -> PyResult<EvalErr<T>>
+fn eval_err_for_pyerr<'p, T>(py: Python<'p>, pyerr: &'p PyErr) -> PyResult<EvalErr<T>>
 where
-    T: FromPyObject<'a>,
+    T: FromPyObject<'p>,
 {
-    let args: &PyTuple = pyerr.pvalue(py).getattr("args")?.extract()?;
-    let arg0: &PyString = args.get_item(0).extract()?;
-    let node: T = pyerr.pvalue(py).getattr("_sexp")?.extract()?;
+    let args: &'p PyTuple = pyerr.pvalue(py).getattr("args")?.extract()?;
+    let arg0: &'p PyString = args.get_item(0).extract()?;
     let s: String = arg0.to_str()?.to_string();
+    let node: T = pyerr.pvalue(py).getattr("_sexp")?.extract()?;
     Ok(EvalErr(node, s))
 }
 
@@ -92,13 +92,14 @@ impl NativeOpLookup {
     }
 }
 
-fn to_result<'n, 'p>(
+fn to_result<'n, 'p, A: Allocator>(
     py: Python<'p>,
-    obj: &PyResult<PyObject>,
-    node: &Node<'n, ArcAllocator>,
-) -> Result<Reduction<<ArcAllocator as Allocator>::Ptr>, EvalErr<<ArcAllocator as Allocator>::Ptr>>
+    obj: &'p PyResult<PyObject>,
+    node: &Node<'n, A>,
+) -> Result<Reduction<<A as Allocator>::Ptr>, EvalErr<<A as Allocator>::Ptr>>
 where
-    Node<'n, ArcAllocator>: ToPyObject,
+    Node<'n, A>: ToPyObject,
+    <A as Allocator>::Ptr: FromPyObject<'p>,
 {
     // There are many places where we can get an error.
     // Call out to `unwrap_or_eval_err` in those places.
@@ -112,8 +113,7 @@ where
         Ok(o) => {
             let pair: &PyTuple = unwrap_or_eval_err(o.extract(py), node, "expected tuple")?;
             let i0: u32 = unwrap_or_eval_err(pair.get_item(0).extract(), node, "expected u32")?;
-            let node: <ArcAllocator as Allocator>::Ptr =
-                unwrap_or_eval_err(pair.get_item(1).extract(), node, "expected node")?;
+            let node: <A as Allocator>::Ptr = unwrap_or_eval_err(pair.get_item(1).extract(), node, "expected node")?;
             Ok(Reduction(i0, node))
         }
     }
