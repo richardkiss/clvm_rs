@@ -107,7 +107,7 @@ impl NativeOpLookup {
     }
 }
 
-impl<'p> INativeOpLookup<ArcAllocator> {
+impl<'p, ArcAllocator: Allocator> INativeOpLookup<ArcAllocator> {
     pub fn operator_handler(
         &self,
         op: &[u8],
@@ -118,6 +118,7 @@ impl<'p> INativeOpLookup<ArcAllocator> {
     >
     where
         Node<'p, ArcAllocator>: ToPyObject,
+        <ArcAllocator as Allocator>::Ptr: PythonSupport,
     {
         if op.len() == 1 {
             if let Some(f) = self.f_lookup[op[0] as usize] {
