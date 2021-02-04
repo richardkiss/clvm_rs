@@ -51,8 +51,8 @@ where
     }
 }
 
-impl<'p> FromPyObject<'p> for ArcSExp {
-    fn extract(obj: &PyAny) -> PyResult<Self> {
+impl<'source> FromPyObject<'source> for ArcSExp {
+    fn extract(obj: &'source PyAny) -> PyResult<Self> {
         let sexp_ptr: PyRef<PyNode> = obj.extract()?;
         let node: ArcSExp = (&sexp_ptr as &PyNode).into();
         Ok(node)
@@ -127,16 +127,25 @@ impl<'p> INativeOpLookup<ArcAllocator> {
 
             match r1 {
                 Err(pyerr) => {
-                    let eval_err: PyResult<EvalErr<<ArcAllocator as Allocator>::Ptr>> = eval_err_for_pyerr(&node, py, &pyerr);
-                    Err(unwrap_or_eval_err(eval_err, &node, "unexpected exception")?)
+                    let eval_err: PyResult<EvalErr<<ArcAllocator as Allocator>::Ptr>> =
+                        eval_err_for_pyerr(&node, py, &pyerr);
+                    let r: EvalErr<<ArcAllocator as Allocator>::Ptr> =
+                        unwrap_or_eval_err(eval_err, &node, "unexpected exception")?;
+                    Err(r)
                 }
                 Ok(o) => {
-                    let pair: &PyTuple =
-                        unwrap_or_eval_err(o.extract(py), &node, "expected tuple")?;
-                    let i0: u32 =
-                        unwrap_or_eval_err(pair.get_item(0).extract(), &node, "expected u32")?;
+                    let py_any: PyResult<&PyAny> = o.extract(py);
+                    let pair: &PyAny = unwrap_or_eval_err(py_any, &node, "expected tuple")?;
+                    let pair: PyResult<&PyTuple> = pair.extract();
+                    let pair: &PyTuple = unwrap_or_eval_err(pair, &node, "expected tuple")?;
+
+                    let t: PyResult<u32> = pair.get_item(0).extract();
+                    let i0: u32 = unwrap_or_eval_err(t, &node, "expected u32")?;
+
+                    let t: PyResult<<ArcAllocator as Allocator>::Ptr> = pair.get_item(1).extract();
+
                     let node: <ArcAllocator as Allocator>::Ptr =
-                        unwrap_or_eval_err(pair.get_item(1).extract(), &node, "expected node")?;
+                        unwrap_or_eval_err(t, &node, "expected node")?;
                     Ok(Reduction(i0, node))
                 }
             }
