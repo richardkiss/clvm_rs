@@ -1,6 +1,7 @@
 use super::arc_allocator::{ArcAllocator, ArcSExp};
 use super::native_op_lookup::INativeOpLookup;
 use super::py_node::PyNode;
+use crate::allocator::Allocator;
 use crate::node::Node;
 use crate::py::run_program::__pyo3_get_function_serialize_and_run_program;
 use crate::reduction::{EvalErr, Reduction};
@@ -11,24 +12,29 @@ use pyo3::types::{PyBytes, PyDict, PyString};
 use pyo3::wrap_pyfunction;
 use pyo3::PyObject;
 
-fn note_result(obj: &PyObject, result: Option<&ArcSExp>) {
+fn note_result<T>(obj: &PyObject, result: Option<&T>)
+where
+    T: ToPyObject,
+{
     Python::with_gil(|py| {
         if let Some(node) = result {
-            let node: PyNode = node.into();
+            let node: PyObject = node.to_object(py);
             let _r: PyResult<PyObject> = obj.call1(py, (node,));
         }
     });
 }
 
-fn post_eval_for_pyobject(obj: PyObject) -> Option<Box<PostEval<ArcAllocator>>> {
-    let py_post_eval: Option<Box<PostEval<ArcAllocator>>> =
-        if Python::with_gil(|py| obj.is_none(py)) {
-            None
-        } else {
-            Some(Box::new(move |result: Option<&ArcSExp>| {
-                note_result(&obj, result)
-            }))
-        };
+fn post_eval_for_pyobject<A: Allocator>(obj: PyObject) -> Option<Box<PostEval<A>>>
+where
+    A::Ptr: ToPyObject,
+{
+    let py_post_eval: Option<Box<PostEval<A>>> = if Python::with_gil(|py| obj.is_none(py)) {
+        None
+    } else {
+        Some(Box::new(move |result: Option<&A::Ptr>| {
+            note_result(&obj, result)
+        }))
+    };
     py_post_eval
 }
 
@@ -56,7 +62,7 @@ fn py_run_program(
                 let r: PyResult<PyObject> = pre_eval.call1(py, (program_clone, args));
                 match r {
                     Ok(py_post_eval) => {
-                        let f = post_eval_for_pyobject(py_post_eval);
+                        let f = post_eval_for_pyobject::<ArcAllocator>(py_post_eval);
                         Ok(f)
                     }
                     Err(ref err) => allocator.err(program, &err.to_string()),
