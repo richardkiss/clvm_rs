@@ -1,6 +1,7 @@
 use super::arc_allocator::{ArcAllocator, ArcSExp};
 use super::native_op_lookup::INativeOpLookup;
 use super::py_node::PyNode;
+use super::py_support::PythonSupport;
 use crate::allocator::Allocator;
 use crate::node::Node;
 use crate::py::run_program::__pyo3_get_function_serialize_and_run_program;
@@ -167,12 +168,22 @@ fn serialize_from_bytes(blob: &[u8]) -> PyNode {
 }
 
 #[pyfunction]
-fn serialize_to_bytes(py: Python, sexp: &PyNode) -> PyObject {
-    let allocator: ArcAllocator = ArcAllocator::new();
-    let node_t: Node<ArcAllocator> = Node::new(&allocator, sexp.into());
+fn serialize_to_bytes(py: Python, sexp: &PyAny) -> PyResult<PyObject> {
+    _serialize_to_bytes(&ArcAllocator::new(), py, sexp)
+}
+
+fn _serialize_to_bytes<A: Allocator<Ptr = P>, P>(
+    allocator: &A,
+    py: Python,
+    sexp: &PyAny,
+) -> PyResult<PyObject>
+where
+    P: PythonSupport,
+{
+    let node_t: Node<A> = Node::new(allocator, P::py_object_to_ptr(sexp)?);
     let blob = node_to_bytes(&node_t).unwrap();
     let pybytes = PyBytes::new(py, &blob);
-    pybytes.to_object(py)
+    Ok(pybytes.to_object(py))
 }
 
 /// This module is a python module implemented in Rust.
