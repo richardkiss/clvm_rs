@@ -1,5 +1,5 @@
 use super::arc_allocator::{ArcAllocator, ArcSExp};
-use super::native_op_lookup::NativeOpLookup;
+use super::native_op_lookup::INativeOpLookup;
 use super::py_node::PyNode;
 use crate::node::Node;
 use crate::py::run_program::__pyo3_get_function_serialize_and_run_program;
@@ -119,6 +119,38 @@ fn raise_eval_error(py: Python, msg: &PyString, sexp: &PyNode) -> PyResult<PyObj
     match r {
         Err(x) => Err(x),
         Ok(_) => Ok(ctx.into()),
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct NativeOpLookup {
+    nol: INativeOpLookup<ArcAllocator>,
+}
+
+#[pymethods]
+impl NativeOpLookup {
+    #[new]
+    fn new(unknown_op_callback: PyObject) -> Self {
+        NativeOpLookup {
+            nol: INativeOpLookup::new(unknown_op_callback),
+        }
+    }
+
+    fn add_native(&mut self, opcode: u8, name: &str) -> PyResult<bool> {
+        self.nol.add_native(opcode, name)
+    }
+}
+
+impl NativeOpLookup {
+    pub fn operator_handler(
+        &self,
+        allocator: &ArcAllocator,
+        op: &[u8],
+        argument_list: &ArcSExp,
+    ) -> Result<Reduction<ArcSExp>, EvalErr<ArcSExp>> {
+        let node = Node::new(allocator, argument_list.clone());
+        self.nol.operator_handler(op, &node)
     }
 }
 

@@ -2,45 +2,14 @@ use crate::allocator::Allocator;
 use crate::node::Node;
 use crate::reduction::{EvalErr, Reduction};
 
-use super::arc_allocator::{ArcAllocator, ArcSExp};
+use super::arc_allocator::ArcSExp;
 use super::f_table::{opcode_by_name, FLookup};
 use super::py_node::PyNode;
+use super::py_support::PythonSupport;
 
 use pyo3::exceptions::PyBaseException;
 use pyo3::prelude::*;
 use pyo3::types::{PyString, PyTuple};
-
-#[pyclass]
-#[derive(Clone)]
-pub struct NativeOpLookup {
-    nol: INativeOpLookup<ArcAllocator>,
-}
-
-#[derive(Clone)]
-struct INativeOpLookup<A: Allocator> {
-    py_callback: PyObject,
-    f_lookup: FLookup<A>,
-}
-
-#[pymethods]
-impl NativeOpLookup {
-    #[new]
-    fn new(unknown_op_callback: &PyAny) -> Self {
-        let f_lookup: FLookup<ArcAllocator> = [None; 256];
-        NativeOpLookup {
-            nol: INativeOpLookup {
-                py_callback: unknown_op_callback.into(),
-                f_lookup,
-            },
-        }
-    }
-
-    fn add_native(&mut self, opcode: u8, name: &str) -> PyResult<bool> {
-        let f = opcode_by_name(name);
-        self.nol.f_lookup[opcode as usize] = f;
-        Ok(f.is_some())
-    }
-}
 
 impl<A: Allocator> ToPyObject for Node<'_, A>
 where
@@ -49,10 +18,6 @@ where
     fn to_object(&self, py: Python<'_>) -> PyObject {
         self.ptr().to_object(py)
     }
-}
-
-trait PythonSupport: Sized {
-    fn py_object_to_ptr(obj: &PyAny) -> PyResult<Self>;
 }
 
 impl PythonSupport for ArcSExp {
@@ -95,18 +60,26 @@ fn unwrap_or_eval_err<T, A: Allocator>(
     }
 }
 
-impl NativeOpLookup {
-    pub fn operator_handler(
-        &self,
-        allocator: &ArcAllocator,
-        op: &[u8],
-        argument_list: &ArcSExp,
-    ) -> Result<Reduction<ArcSExp>, EvalErr<ArcSExp>> {
-        let node = Node::new(allocator, argument_list.clone());
-        self.nol.operator_handler(op, &node)
-    }
+#[derive(Clone)]
+pub struct INativeOpLookup<A: Allocator> {
+    py_callback: PyObject,
+    f_lookup: FLookup<A>,
 }
 
+impl<A: Allocator> INativeOpLookup<A> {
+    pub fn new(unknown_op_callback: PyObject) -> Self {
+        let f_lookup: FLookup<A> = [None; 256];
+        INativeOpLookup {
+            py_callback: unknown_op_callback,
+            f_lookup,
+        }
+    }
+    pub fn add_native(&mut self, opcode: u8, name: &str) -> PyResult<bool> {
+        let f = opcode_by_name(name);
+        self.f_lookup[opcode as usize] = f;
+        Ok(f.is_some())
+    }
+}
 impl<'p, A: Allocator<Ptr = P>, P: Clone> INativeOpLookup<A> {
     pub fn operator_handler(
         &self,
