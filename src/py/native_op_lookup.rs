@@ -80,16 +80,19 @@ impl<A: Allocator> INativeOpLookup<A> {
         Ok(f.is_some())
     }
 }
-impl<'p, A: Allocator<Ptr = P>, P: Clone> INativeOpLookup<A> {
+impl<'a, A: 'a + Allocator<Ptr = P>, P: Clone> INativeOpLookup<A> {
     pub fn operator_handler(
         &self,
+        allocator: &'a A,
         op: &[u8],
-        argument_list: &Node<'p, A>,
+        argument_list: &P,
     ) -> Result<Reduction<P>, EvalErr<P>>
     where
-        Node<'p, A>: ToPyObject,
+        Node<'a, A>: ToPyObject,
         P: PythonSupport,
     {
+        let argument_list = &Node::new(allocator, argument_list.clone());
+
         if op.len() == 1 {
             if let Some(f) = self.f_lookup[op[0] as usize] {
                 return f(argument_list);

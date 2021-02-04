@@ -93,12 +93,79 @@ fn py_run_program(
     match r {
         Ok(reduction) => Ok((reduction.0, reduction.1.into())),
         Err(eval_err) => {
-            let node: PyNode = eval_err.0.into();
+            let node: PyObject = eval_err.0.to_object(py);
             let s: String = eval_err.1;
             let s1: &str = &s;
             let msg: &PyString = PyString::new(py, s1);
-            let sexp_any: PyNode = node;
-            match raise_eval_error(py, &msg, &sexp_any) {
+            match raise_eval_error(py, &msg, node) {
+                Err(x) => Err(x),
+                _ => panic!(),
+            }
+        }
+    }
+}
+
+fn _py_run_program<A: 'static, P>(
+    py: Python,
+    program: &P,
+    args: &P,
+    quote_kw: u8,
+    apply_kw: u8,
+    max_cost: u32,
+    op_lookup: INativeOpLookup<A>,
+    pre_eval: PyObject,
+) -> PyResult<(u32, P)>
+where
+    A: Allocator<Ptr = P> + Default,
+    P: PythonSupport + Clone + ToPyObject,
+{
+    let allocator = A::default();
+
+    let py_pre_eval_t: Option<PreEval<A>> = None /* if pre_eval.is_none(py) {
+        None
+    } else {
+        Some(Box::new(move |program: &P, args: &P| {
+            Python::with_gil(|py| {
+                let program_clone: PyNode = program.into();
+                let args: PyNode = args.into();
+                let r: PyResult<PyObject> = pre_eval.call1(py, (program_clone, args));
+                match r {
+                    Ok(py_post_eval) => {
+                        let f = post_eval_for_pyobject::<A>(py_post_eval);
+                        Ok(f)
+                    }
+                    Err(ref err) => allocator.err(program, &err.to_string()),
+                }
+            })
+        }))
+    }*/ ;
+
+    // BRAIN DAMAGE: we create a second `A` here
+    // This only works because this allocator type has the property that
+    // you can create a pair from nodes from different allocators.
+
+    let allocator: A = A::default();
+    let f: OperatorHandler<A> =
+        Box::new(move |allocator, op, args| op_lookup.operator_handler(allocator, op, args));
+
+    let r: Result<Reduction<P>, EvalErr<P>> = run_program(
+        &allocator,
+        &program,
+        &args,
+        quote_kw,
+        apply_kw,
+        max_cost,
+        &f,
+        py_pre_eval_t,
+    );
+    match r {
+        Ok(reduction) => Ok((reduction.0, reduction.1.into())),
+        Err(eval_err) => {
+            let node: PyObject = eval_err.0.to_object(py);
+            let s: String = eval_err.1;
+            let s1: &str = &s;
+            let msg: &PyString = PyString::new(py, s1);
+            match raise_eval_error(py, &msg, node) {
                 Err(x) => Err(x),
                 _ => panic!(),
             }
@@ -107,16 +174,14 @@ fn py_run_program(
 }
 
 #[pyfunction]
-fn raise_eval_error(py: Python, msg: &PyString, sexp: &PyNode) -> PyResult<PyObject> {
-    let local_sexp: PyNode = sexp.clone();
-    let sexp_any: PyObject = local_sexp.into_py(py);
+fn raise_eval_error(py: Python, msg: &PyString, sexp: PyObject) -> PyResult<PyObject> {
     let msg_any: PyObject = msg.into_py(py);
 
     let s0: &PyString = PyString::new(py, "msg");
     let s1: &PyString = PyString::new(py, "sexp");
     let ctx: &PyDict = PyDict::new(py);
     ctx.set_item(s0, msg_any)?;
-    ctx.set_item(s1, sexp_any)?;
+    ctx.set_item(s1, sexp)?;
 
     let r = py.run(
         "from clvm.EvalError import EvalError; raise EvalError(msg, sexp)",
@@ -156,8 +221,7 @@ impl NativeOpLookup {
         op: &[u8],
         argument_list: &ArcSExp,
     ) -> Result<Reduction<ArcSExp>, EvalErr<ArcSExp>> {
-        let node = Node::new(allocator, argument_list.clone());
-        self.nol.operator_handler(op, &node)
+        self.nol.operator_handler(allocator, op, argument_list)
     }
 }
 

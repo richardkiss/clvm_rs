@@ -1,0 +1,86 @@
+- deserialize_and_run_program
+  v return bytes instead of [int]
+
+- more generalizations:
+  - py_node uses Node
+
+- get rid of `CLVMObject.__new__` in favour of `CLVMObjectAllocator.new_[obj|pair|atom]`
+  - in `dev`
+  - make sure it doesn't break tests in `chia-blockchain`
+
+- get rid of `<T: Allocator + 'static>` in run_program.rs
+
+
+v add scope to SExp<>
+
+- create a new allocator `PyHybridAllocator`
+  - PyHybridNode
+  - for Atom we either have just native `Arc<u8>` or Py<PyBytes> (maybe with already generated &[u8])
+  - for Pair we either have just (PyHybridNode, PyHybridNode); or maybe also PyTuple
+  -> expand `SExp` to allow any type that does `Deref<Target = &[u8]>`
+
+- refactor PyNode to parameterized part and API part
+
+- try getting rid of `Arc`
+   - `Rc`
+   - `PyRef`
+
+- try writing a generalized allocator
+  - uses Arc (or Rc) if python is not around
+    - caching python copy on demand when necessary
+  - uses python data structures if it is around
+
+- can I create a merged allocator that works with both Arc & Int??
+
+- add "does_interoperate" method to `Allocator`
+
+- figure out why rust imp so slow!
+- `Cow`
+  - rewrite with `IntAllocator`?
+
+- need a better name prefix for rust objects
+  - `Native`?
+
+- add "substr" to allocator
+
+- read https://tenthousandmeters.com/blog/python-behind-the-scenes-7-how-python-attributes-work/
+
+- figure out why `PyCLVMObject` is so much slower
+  - come up with a test suite which doesn't replace `run_program`, but just `PyCLVMObject`
+  - write a profile/benchmark suite
+
+- switch to a `PyAllocator` which works with python `CLVMObject` objects
+  - use ".atom" and ".pair"
+  - when we call `sexp`, we want to return the atom or the pair
+    - upon returning the atom, we drill down to the `PyBytes` object, then change its lifetime to be the same as Allocator
+
+- figure out why `SExp.to` is so slow, especially in a deep tree
+
+- read `serde` to learn about generalizing streaming to [u8]
+
+- add a caching version which caches the hierarchy
+
+- create a NodePtr
+  - an Allocator has an associated NodePtr which is a `Copy` type that resolves to a Node
+  - a `Node` is a NodePtr + Allocator
+  - operators can take a `Node` (which has creating utilities)
+
+- PyAllocator (impl for Py):
+  - opaque type is PyNode
+    - contains Union on &[u8] and a pair of PyNode objects
+    - PyContents: enum of PyTuple, PyBytes
+    - also contains a cell with Optional<PyContents> where this maps to the python pair or `bytes`
+
+- VecAllocator:
+  - opaque type is union of (u32, u32) and u32
+  - `.sexp(&node)` return ints for pair and looks up &[u8] for atom
+
+- write python allocator
+  - python object that wraps an allocator
+    - allocate with PyBytes and PyTuple
+
+  - python object that wraps a Node
+
+- make serialize non-recursive
+  - esp in python
+  - write serialization in clvm (!!)
