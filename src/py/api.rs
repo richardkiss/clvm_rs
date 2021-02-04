@@ -43,102 +43,77 @@ where
 #[allow(clippy::too_many_arguments)]
 fn py_run_program(
     py: Python,
-    program: &PyNode,
-    args: &PyNode,
+    program: ArcSExp,
+    args: ArcSExp,
     quote_kw: u8,
     apply_kw: u8,
     max_cost: u32,
     op_lookup: NativeOpLookup,
     pre_eval: PyObject,
 ) -> PyResult<(u32, PyNode)> {
-    let allocator = ArcAllocator::new();
-
-    let py_pre_eval_t: Option<PreEval<ArcAllocator>> = if pre_eval.is_none(py) {
-        None
-    } else {
-        Some(Box::new(move |program: &ArcSExp, args: &ArcSExp| {
-            Python::with_gil(|py| {
-                let program_clone: PyNode = program.into();
-                let args: PyNode = args.into();
-                let r: PyResult<PyObject> = pre_eval.call1(py, (program_clone, args));
-                match r {
-                    Ok(py_post_eval) => {
-                        let f = post_eval_for_pyobject::<ArcAllocator>(py_post_eval);
-                        Ok(f)
-                    }
-                    Err(ref err) => allocator.err(program, &err.to_string()),
-                }
-            })
-        }))
-    };
-
-    // BRAIN DAMAGE: we create a second `ArcAllocator` here
-    // This only works because this allocator type has the property that
-    // you can create a pair from nodes from different allocators.
-
-    let allocator: ArcAllocator = ArcAllocator::new();
-    let f: OperatorHandler<ArcAllocator> =
-        Box::new(move |allocator, op, args| op_lookup.operator_handler(allocator, op, args));
-
-    let r: Result<Reduction<ArcSExp>, EvalErr<ArcSExp>> = run_program(
-        &allocator,
-        &program.into(),
-        &args.into(),
+    _py_run_program::<ArcAllocator, ArcSExp, PyNode>(
+        py,
+        program,
+        args,
         quote_kw,
         apply_kw,
         max_cost,
-        &f,
-        py_pre_eval_t,
-    );
-    match r {
-        Ok(reduction) => Ok((reduction.0, reduction.1.into())),
-        Err(eval_err) => {
-            let node: PyObject = eval_err.0.to_object(py);
-            let s: String = eval_err.1;
-            let s1: &str = &s;
-            let msg: &PyString = PyString::new(py, s1);
-            match raise_eval_error(py, &msg, node) {
-                Err(x) => Err(x),
-                _ => panic!(),
-            }
-        }
+        op_lookup.nol,
+        pre_eval,
+    )
+}
+
+impl<'source> FromPyObject<'source> for ArcSExp {
+    fn extract(obj: &'source PyAny) -> PyResult<Self> {
+        let py_node: PyNode = obj.extract()?;
+        Ok(py_node.into())
     }
 }
 
-fn _py_run_program<A: 'static, P>(
+impl<P: Clone> dyn Allocator<Ptr = P> {
+    pub fn err<T>(&self, node: &P, msg: &str) -> Result<T, EvalErr<P>> {
+        Err(EvalErr(node.clone(), msg.to_owned()))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn _py_run_program<'a, A: 'a + 'static, P: 'a, I>(
     py: Python,
-    program: &P,
-    args: &P,
+    program: P,
+    args: P,
     quote_kw: u8,
     apply_kw: u8,
     max_cost: u32,
     op_lookup: INativeOpLookup<A>,
     pre_eval: PyObject,
-) -> PyResult<(u32, P)>
+) -> PyResult<(u32, I)>
 where
     A: Allocator<Ptr = P> + Default,
     P: PythonSupport + Clone + ToPyObject,
+    I: From<&'a P> + From<P>,
 {
     let allocator = A::default();
 
-    let py_pre_eval_t: Option<PreEval<A>> = None /* if pre_eval.is_none(py) {
+    let py_pre_eval_t: Option<PreEval<A>> = if pre_eval.is_none(py) {
         None
     } else {
         Some(Box::new(move |program: &P, args: &P| {
             Python::with_gil(|py| {
-                let program_clone: PyNode = program.into();
-                let args: PyNode = args.into();
+                let program_clone: PyObject = program.to_object(py);
+                let args: PyObject = args.to_object(py);
                 let r: PyResult<PyObject> = pre_eval.call1(py, (program_clone, args));
                 match r {
                     Ok(py_post_eval) => {
                         let f = post_eval_for_pyobject::<A>(py_post_eval);
                         Ok(f)
                     }
-                    Err(ref err) => allocator.err(program, &err.to_string()),
+                    Err(ref err) => {
+                        (&allocator as &dyn Allocator<Ptr = A::Ptr>).err(program, &err.to_string())
+                    }
                 }
             })
         }))
-    }*/ ;
+    };
 
     // BRAIN DAMAGE: we create a second `A` here
     // This only works because this allocator type has the property that
