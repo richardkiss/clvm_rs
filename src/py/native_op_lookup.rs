@@ -107,18 +107,15 @@ impl NativeOpLookup {
     }
 }
 
-impl<'p, ArcAllocator: Allocator> INativeOpLookup<ArcAllocator> {
+impl<'p, A: Allocator<Ptr = P>, P: Clone> INativeOpLookup<A> {
     pub fn operator_handler(
         &self,
         op: &[u8],
-        argument_list: &Node<'p, ArcAllocator>,
-    ) -> Result<
-        Reduction<<ArcAllocator as Allocator>::Ptr>,
-        EvalErr<<ArcAllocator as Allocator>::Ptr>,
-    >
+        argument_list: &Node<'p, A>,
+    ) -> Result<Reduction<P>, EvalErr<P>>
     where
-        Node<'p, ArcAllocator>: ToPyObject,
-        <ArcAllocator as Allocator>::Ptr: PythonSupport,
+        Node<'p, A>: ToPyObject,
+        P: PythonSupport,
     {
         if op.len() == 1 {
             if let Some(f) = self.f_lookup[op[0] as usize] {
@@ -133,9 +130,8 @@ impl<'p, ArcAllocator: Allocator> INativeOpLookup<ArcAllocator> {
 
             match r1 {
                 Err(pyerr) => {
-                    let eval_err: PyResult<EvalErr<<ArcAllocator as Allocator>::Ptr>> =
-                        eval_err_for_pyerr(&node, py, &pyerr);
-                    let r: EvalErr<<ArcAllocator as Allocator>::Ptr> =
+                    let eval_err: PyResult<EvalErr<P>> = eval_err_for_pyerr(&node, py, &pyerr);
+                    let r: EvalErr<P> =
                         unwrap_or_eval_err(eval_err, &node, "unexpected exception")?;
                     Err(r)
                 }
@@ -148,11 +144,9 @@ impl<'p, ArcAllocator: Allocator> INativeOpLookup<ArcAllocator> {
                     let t: PyResult<u32> = pair.get_item(0).extract();
                     let i0: u32 = unwrap_or_eval_err(t, &node, "expected u32")?;
 
-                    let t: PyResult<<ArcAllocator as Allocator>::Ptr> =
-                        <ArcAllocator as Allocator>::Ptr::py_object_to_ptr(pair.get_item(1));
+                    let t: PyResult<P> = P::py_object_to_ptr(pair.get_item(1));
 
-                    let node: <ArcAllocator as Allocator>::Ptr =
-                        unwrap_or_eval_err(t, &node, "expected node")?;
+                    let node: P = unwrap_or_eval_err(t, &node, "expected node")?;
                     Ok(Reduction(i0, node))
                 }
             }
