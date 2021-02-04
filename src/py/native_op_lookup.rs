@@ -51,25 +51,30 @@ where
     }
 }
 
-impl<'source> FromPyObject<'source> for ArcSExp {
-    fn extract(obj: &'source PyAny) -> PyResult<Self> {
-        let sexp_ptr: PyRef<PyNode> = obj.extract()?;
+trait PythonSupport: Sized {
+    fn py_object_to_ptr(obj: &PyAny) -> PyResult<Self>;
+}
+
+impl PythonSupport for ArcSExp {
+    fn py_object_to_ptr(obj: &PyAny) -> PyResult<ArcSExp> {
+        let sexp_ptr: PyNode = obj.extract()?;
         let node: ArcSExp = (&sexp_ptr as &PyNode).into();
         Ok(node)
     }
 }
 
-fn eval_err_for_pyerr<'p, A: Allocator, T>(
+fn eval_err_for_pyerr<'p, A: Allocator, T: Clone>(
     _node: &Node<'_, A>,
     py: Python<'p>,
     pyerr: &'p PyErr,
 ) -> PyResult<EvalErr<T>>
 where
-    T: FromPyObject<'p>,
+    T: PythonSupport,
 {
     let be: &PyBaseException = pyerr.pvalue(py);
     let sexp: &PyAny = be.getattr("_sexp")?;
-    let node: T = sexp.extract()?;
+    let node: PyResult<T> = T::py_object_to_ptr(sexp);
+    let node = node?;
 
     let args: &PyAny = be.getattr("args")?;
     let args: &PyTuple = args.extract()?;
@@ -142,7 +147,8 @@ impl<'p> INativeOpLookup<ArcAllocator> {
                     let t: PyResult<u32> = pair.get_item(0).extract();
                     let i0: u32 = unwrap_or_eval_err(t, &node, "expected u32")?;
 
-                    let t: PyResult<<ArcAllocator as Allocator>::Ptr> = pair.get_item(1).extract();
+                    let t: PyResult<<ArcAllocator as Allocator>::Ptr> =
+                        <ArcAllocator as Allocator>::Ptr::py_object_to_ptr(pair.get_item(1));
 
                     let node: <ArcAllocator as Allocator>::Ptr =
                         unwrap_or_eval_err(t, &node, "expected node")?;
