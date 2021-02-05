@@ -12,3 +12,5 @@ mod serialize;
 
 #[cfg(test)]
 mod tests;
+
+mod persist;

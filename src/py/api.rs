@@ -122,6 +122,8 @@ fn serialize_to_bytes(sexp: &PyNode) -> Vec<u8> {
     node_to_bytes(&node_t).unwrap()
 }
 
+use crate::persist::Persist;
+
 /// This module is a python module implemented in Rust.
 #[pymodule]
 fn clvm_rs(_py: Python, m: &PyModule) -> PyResult<()> {
@@ -132,6 +134,7 @@ fn clvm_rs(_py: Python, m: &PyModule) -> PyResult<()> {
 
     m.add_class::<PyNode>()?;
     m.add_class::<NativeOpLookup>()?;
+    m.add_class::<Persist>()?;
 
     m.add_function(wrap_pyfunction!(raise_eval_error, m)?)?;
 
