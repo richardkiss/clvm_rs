@@ -44,8 +44,8 @@ impl Drop for NativeOpLookup {
 }
 
 impl NativeOpLookup {
-    fn gnol<'a>(&'a self) -> &'a GenericNativeOpLookup<AllocatorT> {
-        unsafe { std::mem::transmute(&self.nol) }
+    fn gnol<'a>(&self) -> &'a GenericNativeOpLookup<AllocatorT> {
+        unsafe { &*(&self.nol as *const usize as *const GenericNativeOpLookup<AllocatorT>) }
     }
 }
 
