@@ -3,14 +3,14 @@ use pyo3::types::{PyDict, PyString};
 use pyo3::wrap_pyfunction;
 use pyo3::PyObject;
 
-use super::arc_allocator::ArcAllocator;
+//use super::arc_allocator::ArcAllocator;
 use super::f_table::make_f_lookup;
 use super::glue::{_py_run_program, _serialize_from_bytes, _serialize_to_bytes};
 use super::native_op_lookup::GenericNativeOpLookup;
-use super::py_node::PyNode;
+use super::py_allocator::PyNode;
 use super::run_program::{__pyo3_get_function_serialize_and_run_program, STRICT_MODE};
 
-type AllocatorT = ArcAllocator;
+type AllocatorT<'p> = Python<'p>;
 type NodeClass = PyNode;
 
 #[pyclass]
@@ -61,10 +61,8 @@ fn py_run_program(
     op_lookup: NativeOpLookup,
     pre_eval: PyObject,
 ) -> PyResult<(u32, NodeClass)> {
-    let allocator = AllocatorT::new();
-    _py_run_program(
+    _py_run_program1(
         py,
-        &allocator,
         program,
         args,
         quote_kw,
@@ -72,6 +70,24 @@ fn py_run_program(
         max_cost,
         op_lookup.gnol().clone(),
         pre_eval,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn _py_run_program1(
+    py: Python,
+    program: &PyNode,
+    args: &PyNode,
+    quote_kw: u8,
+    apply_kw: u8,
+    max_cost: u32,
+    op_lookup: GenericNativeOpLookup<Python>,
+    pre_eval: PyObject,
+) -> PyResult<(u32, PyNode)> {
+    let op_lookup: GenericNativeOpLookup<Python> = unsafe { std::mem::transmute(op_lookup) };
+    let allocator: &Python = unsafe { std::mem::transmute(&py) };
+    _py_run_program(
+        py, allocator, program, args, quote_kw, apply_kw, max_cost, op_lookup, pre_eval,
     )
 }
 
@@ -92,13 +108,13 @@ fn raise_eval_error(py: Python, msg: &PyString, sexp: PyObject) -> PyResult<PyOb
 }
 
 #[pyfunction]
-fn serialize_from_bytes(blob: &[u8]) -> NodeClass {
-    _serialize_from_bytes(&AllocatorT::default(), blob)
+fn serialize_from_bytes(py: Python, blob: &[u8]) -> NodeClass {
+    _serialize_from_bytes(&py, blob)
 }
 
 #[pyfunction]
 fn serialize_to_bytes(py: Python, sexp: &PyAny) -> PyResult<PyObject> {
-    _serialize_to_bytes::<AllocatorT, NodeClass>(&AllocatorT::default(), py, sexp)
+    _serialize_to_bytes::<AllocatorT, NodeClass>(&py, py, sexp)
 }
 
 /// This module is a python module implemented in Rust.
