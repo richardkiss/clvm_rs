@@ -16,22 +16,36 @@ type NodeClass = PyNode;
 #[pyclass]
 #[derive(Clone)]
 pub struct NativeOpLookup {
-    nol: GenericNativeOpLookup<AllocatorT>,
+    nol: usize, // Box<GenericNativeOpLookup<AllocatorT>>,
 }
 
 #[pymethods]
 impl NativeOpLookup {
     #[new]
     fn new(native_opcode_list: &[u8], unknown_op_callback: PyObject) -> Self {
-        let native_lookup = make_f_lookup();
+        let native_lookup = make_f_lookup::<AllocatorT>();
         let mut f_lookup = [None; 256];
         for i in native_opcode_list.iter() {
             let idx = *i as usize;
             f_lookup[idx] = native_lookup[idx];
         }
+        let obj = Box::new(GenericNativeOpLookup::new(unknown_op_callback, f_lookup));
+
         NativeOpLookup {
-            nol: GenericNativeOpLookup::new(unknown_op_callback, f_lookup),
+            nol: Box::into_raw(obj) as usize,
         }
+    }
+}
+
+impl Drop for NativeOpLookup {
+    fn drop(&mut self) {
+        let _b = unsafe { Box::from_raw(self.nol as *mut GenericNativeOpLookup<AllocatorT>) };
+    }
+}
+
+impl NativeOpLookup {
+    fn gnol<'a>(&'a self) -> &'a GenericNativeOpLookup<AllocatorT> {
+        unsafe { std::mem::transmute(&self.nol) }
     }
 }
 
@@ -56,7 +70,7 @@ fn py_run_program(
         quote_kw,
         apply_kw,
         max_cost,
-        op_lookup.nol,
+        op_lookup.gnol().clone(),
         pre_eval,
     )
 }
