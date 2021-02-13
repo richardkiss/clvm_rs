@@ -104,6 +104,7 @@ pub fn serialize_and_run_program(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 #[pyfunction]
 pub fn deserialize_and_run_program(
     py: Python,
