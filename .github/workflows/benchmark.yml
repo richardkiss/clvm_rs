@@ -54,7 +54,7 @@ jobs:
         git clone https://github.com/Chia-Network/clvm_tools.git --branch=main --single-branch
         python -m pip install ./clvm_tools
         python -m pip install colorama
-        maturin develop --release
+        maturin develop --release --cargo-extra-args="--features=gen,py-api,extension-module"
 
     - name: Run benchmarks (Windows)
       if: startsWith(matrix.os, 'windows')
@@ -73,7 +73,7 @@ jobs:
         git clone https://github.com/Chia-Network/clvm_tools.git --branch=main --single-branch
         python -m pip install ./clvm_tools
         python -m pip install colorama
-        maturin develop --release --cargo-extra-args="--features=openssl"
+        maturin develop --release --cargo-extra-args="--features=openssl,gen,py-api,extension-module"
 
     - name: Run benchmarks
       if: ${{ !startsWith(matrix.os, 'windows') }}

@@ -4,12 +4,13 @@ mod core_ops;
 pub mod cost;
 mod dialect;
 mod err_utils;
+#[cfg(feature = "gen")]
 mod gen;
 pub mod more_ops;
 pub mod node;
 pub mod number;
 pub mod op_utils;
-#[cfg(not(any(test, target_family = "wasm")))]
+#[cfg(feature = "py-api")]
 pub mod py;
 pub mod reduction;
 pub mod run_program;

@@ -18,7 +18,9 @@ lto = true
 
 [features]
 extension-module = ["pyo3/extension-module"]
-default = ["extension-module"]
+py-api = []
+gen = []
+default = ["extension-module", "gen", "py-api"]
 
 [dependencies]
 hex = "=0.4.3"
