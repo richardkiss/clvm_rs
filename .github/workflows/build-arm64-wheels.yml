@@ -54,9 +54,8 @@ jobs:
             if [ ! -f "activate" ]; then ln -s venv/bin/activate; fi && \
             . ./activate && \
             pip install maturin && \
-            CC=gcc maturin build --no-sdist --release --strip --manylinux 2014 --cargo-extra-args="--features=openssl" \
+            CC=gcc maturin build --no-sdist --release --strip --manylinux 2014 --cargo-extra-args="--features=openssl,gen,py-api,extension-module" \
           '
-
     - name: Upload artifacts
       uses: actions/upload-artifact@v2
       with:
