@@ -10,8 +10,7 @@ use super::run_program::{
 use crate::run_program::STRICT_MODE;
 
 /// This module is a python module implemented in Rust.
-#[pymodule]
-fn clvm_rs(_py: Python, m: &PyModule) -> PyResult<()> {
+pub fn clvm_rs_module(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(deserialize_and_run_program2, m)?)?;
     m.add_function(wrap_pyfunction!(run_generator2, m)?)?;
     m.add_function(wrap_pyfunction!(run_chia_program, m)?)?;
