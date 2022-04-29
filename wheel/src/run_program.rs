@@ -1,6 +1,6 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
-use crate::adapt_response::adapt_response_to_py;
 use crate::lazy_node::LazyNode;
 use clvmr::allocator::Allocator;
 use clvmr::chia_dialect::ChiaDialect;
@@ -11,6 +11,25 @@ use clvmr::runtime_dialect::RuntimeDialect;
 use clvmr::serialize::{node_from_bytes, serialized_length_from_bytes};
 
 use pyo3::prelude::*;
+
+fn adapt_response(
+    py: Python,
+    allocator: Allocator,
+    response: Response,
+) -> PyResult<(PyObject, LazyNode)> {
+    match response {
+        Ok(reduction) => {
+            let val = LazyNode::new(Rc::new(allocator), reduction.1);
+            let rv: PyObject = reduction.0.into_py(py);
+            Ok((rv, val))
+        }
+        Err(eval_err) => {
+            let rv: PyObject = eval_err.1.into_py(py);
+            let val = LazyNode::new(Rc::new(allocator), eval_err.0);
+            Ok((rv, val))
+        }
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_serialized_program(
@@ -52,7 +71,7 @@ pub fn deserialize_and_run_program2(
     opcode_lookup_by_name: HashMap<String, Vec<u8>>,
     max_cost: Cost,
     flags: u32,
-) -> PyResult<(Cost, LazyNode)> {
+) -> PyResult<(PyObject, LazyNode)> {
     let mut allocator = Allocator::new();
     let r = run_serialized_program(
         py,
@@ -65,7 +84,7 @@ pub fn deserialize_and_run_program2(
         max_cost,
         flags,
     )?;
-    adapt_response_to_py(py, allocator, r)
+    adapt_response(py, allocator, r)
 }
 
 #[pyfunction]
@@ -75,7 +94,7 @@ pub fn run_chia_program(
     args: &[u8],
     max_cost: Cost,
     flags: u32,
-) -> PyResult<(Cost, LazyNode)> {
+) -> PyResult<(PyObject, LazyNode)> {
     let mut allocator = Allocator::new();
 
     let r: Response = (|| -> PyResult<Response> {
@@ -86,5 +105,5 @@ pub fn run_chia_program(
         Ok(py
             .allow_threads(|| run_program(&mut allocator, &dialect, program, args, max_cost, None)))
     })()?;
-    adapt_response_to_py(py, allocator, r)
+    adapt_response(py, allocator, r)
 }
