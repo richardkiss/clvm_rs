@@ -2,56 +2,67 @@ use crate::allocator::{Allocator, NodePtr, SExp};
 use crate::sha2::Sha256;
 use std::collections::HashMap;
 
-pub struct ObjectCache<T> {
+type HashFunction<T> = fn(&mut ObjectCache<T>, &Allocator, NodePtr) -> Option<T>;
+
+pub struct ObjectCache<'a, T> {
     hash: HashMap<NodePtr, T>,
+    allocator: &'a Allocator,
+    f: HashFunction<T>,
 }
 
-impl<T> ObjectCache<T> {
-    pub fn get(&self, key: &NodePtr) -> Option<&T> {
-        self.hash.get(key)
-    }
-    pub fn default() -> Self {
+impl<'a, T: Clone> ObjectCache<'a, T> {
+    pub fn new(allocator: &'a Allocator, f: HashFunction<T>) -> Self {
         let hash = HashMap::new();
-        Self { hash }
+        Self { hash, allocator, f }
+    }
+    pub fn get(&mut self, node: &NodePtr) -> Option<&T> {
+        self.update(&node);
+        self.hash.get(node)
     }
 }
 
-pub fn generate_cache<T>(
-    allocator: &mut Allocator,
+pub fn generate_cache<'a, T>(
+    allocator: &'a Allocator,
     root_node: NodePtr,
-    f: fn(&mut ObjectCache<T>, &mut Allocator, NodePtr) -> Option<T>,
-) -> ObjectCache<T> {
-    let mut cache: ObjectCache<T> = ObjectCache::default();
-    cache.update(allocator, root_node, f);
+    f: HashFunction<T>,
+) -> ObjectCache<'a, T>
+where
+    T: Clone,
+{
+    let mut cache: ObjectCache<T> = ObjectCache::new(allocator, f);
+    cache.update(&root_node);
     cache
 }
 
-impl<T> ObjectCache<T> {
-    pub fn update(
-        &mut self,
-        allocator: &mut Allocator,
-        root_node: NodePtr,
-        f: fn(&mut ObjectCache<T>, &mut Allocator, NodePtr) -> Option<T>,
-    ) -> () {
-        let mut obj_list = vec![root_node];
+impl<'a, T: Clone> ObjectCache<'a, T> {
+    pub fn update(&mut self, root_node: &NodePtr) -> () {
+        let mut obj_list = vec![*root_node];
         loop {
             match obj_list.pop() {
                 None => {
                     return;
                 }
-                Some(node) => match f(self, allocator, node) {
-                    None => match allocator.sexp(node) {
-                        SExp::Pair(left, right) => {
-                            obj_list.push(node);
-                            obj_list.push(left);
-                            obj_list.push(right);
+                Some(node) => {
+                    let v = self.hash.get(&node);
+                    match v {
+                        Some(_) => {
+                            return;
                         }
-                        _ => panic!("f returned `None` for atom"),
-                    },
-                    Some(v) => {
-                        self.hash.insert(node, v);
+                        None => match (self.f)(self, self.allocator, node) {
+                            None => match self.allocator.sexp(node) {
+                                SExp::Pair(left, right) => {
+                                    obj_list.push(node);
+                                    obj_list.push(left);
+                                    obj_list.push(right);
+                                }
+                                _ => panic!("f returned `None` for atom"),
+                            },
+                            Some(v) => {
+                                self.hash.insert(node, v);
+                            }
+                        },
                     }
-                },
+                }
             }
         }
     }
@@ -59,7 +70,7 @@ impl<T> ObjectCache<T> {
 
 pub fn treehash(
     cache: &mut ObjectCache<[u8; 32]>,
-    allocator: &mut Allocator,
+    allocator: &Allocator,
     node: NodePtr,
 ) -> Option<[u8; 32]> {
     match allocator.sexp(node) {
@@ -87,7 +98,7 @@ pub fn treehash(
 
 pub fn serialized_length(
     cache: &mut ObjectCache<usize>,
-    allocator: &mut Allocator,
+    allocator: &Allocator,
     node: NodePtr,
 ) -> Option<usize> {
     match allocator.sexp(node) {

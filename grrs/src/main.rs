@@ -1,6 +1,6 @@
 use clap::Parser;
 use clvmr::allocator::{Allocator, NodePtr};
-use clvmr::serialization_cache::{generate_cache, serialized_length, treehash};
+use clvmr::serialization_cache::{generate_cache, serialized_length, treehash, ObjectCache};
 use clvmr::serialize::node_from_bytes;
 use hex::{decode, encode};
 //use std::env::args;
@@ -97,8 +97,8 @@ fn main() {
     let mut allocator = Allocator::new();
     let node = node_from_bytes(&mut allocator, &input_program).expect("can't deserialize");
     println!("{:?}", node);
-    let thc = generate_cache(&mut allocator, node, treehash);
+    let mut thc = ObjectCache::new(&allocator, treehash);
     println!("{:?}", encode(thc.get(&node).unwrap()));
-    let slc = generate_cache(&mut allocator, node, serialized_length);
+    let mut slc = ObjectCache::new(&allocator, serialized_length);
     println!("{:?}", slc.get(&node).unwrap());
 }

@@ -1,5 +1,5 @@
 [workspace]
-members = ["wasm", "wheel"]
+members = ["wasm", "wheel", "grrs"]
 
 [package]
 name = "clvmr"
