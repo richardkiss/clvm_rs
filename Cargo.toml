@@ -1,5 +1,5 @@
 [workspace]
-members = ["wasm", "wheel", "grrs"]
+members = ["wasm", "wheel"]
 
 [package]
 name = "clvmr"
@@ -28,3 +28,8 @@ num-integer = "=0.1.44"
 bls12_381 = "=0.5.0"
 sha2 = "=0.9.5"
 openssl = { version = "0.10.35", features = ["vendored"], optional = true }
+clap = { version = "3.0", features = ["derive"] }
+
+[[bin]]
+name = "cldump"
+path = "src/cmds/main.rs"
