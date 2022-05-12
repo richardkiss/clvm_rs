@@ -9,7 +9,7 @@ use crate::allocator::{Allocator, NodePtr, SExp};
 use crate::node::Node;
 
 const MAX_SINGLE_BYTE: u8 = 0x7f;
-const CONS_BOX_MARKER: u8 = 0xff;
+pub const CONS_BOX_MARKER: u8 = 0xff;
 
 fn bad_encoding() -> std::io::Error {
     Error::new(ErrorKind::InvalidInput, "bad encoding")
