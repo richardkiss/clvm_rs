@@ -1,5 +1,4 @@
-use std::collections::hash_set::HashSet;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::bytes32::{hash_blob, hash_blobs, Bytes32};
 
