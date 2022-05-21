@@ -28,24 +28,32 @@ fn internal_error() -> std::io::Error {
     Error::new(ErrorKind::InvalidInput, "internal error")
 }
 
-fn encode_size(f: &mut dyn Write, size: u64) -> std::io::Result<()> {
-    if size < 0x40 {
-        f.write_all(&[(0x80 | size) as u8])?;
+fn write_atom_encoding_prefix_with_size(
+    f: &mut dyn Write,
+    atom_0: u8,
+    size: u64,
+) -> std::io::Result<()> {
+    if size == 0 {
+        f.write_all(&[0x80])
+    } else if size == 1 && atom_0 < 0x80 {
+        Ok(())
+    } else if size < 0x40 {
+        f.write_all(&[0x80 | (size as u8)])
     } else if size < 0x2000 {
-        f.write_all(&[(0xc0 | (size >> 8)) as u8, ((size) & 0xff) as u8])?;
+        f.write_all(&[0xc0 | (size >> 8) as u8, size as u8])
     } else if size < 0x10_0000 {
         f.write_all(&[
             (0xe0 | (size >> 16)) as u8,
             ((size >> 8) & 0xff) as u8,
             ((size) & 0xff) as u8,
-        ])?;
+        ])
     } else if size < 0x800_0000 {
         f.write_all(&[
             (0xf0 | (size >> 24)) as u8,
             ((size >> 16) & 0xff) as u8,
             ((size >> 8) & 0xff) as u8,
             ((size) & 0xff) as u8,
-        ])?;
+        ])
     } else if size < 0x4_0000_0000 {
         f.write_all(&[
             (0xf8 | (size >> 32)) as u8,
@@ -53,11 +61,19 @@ fn encode_size(f: &mut dyn Write, size: u64) -> std::io::Result<()> {
             ((size >> 16) & 0xff) as u8,
             ((size >> 8) & 0xff) as u8,
             ((size) & 0xff) as u8,
-        ])?;
+        ])
     } else {
-        return Err(Error::new(ErrorKind::InvalidData, "atom too big"));
+        Err(Error::new(ErrorKind::InvalidData, "atom too big"))
     }
-    Ok(())
+}
+
+fn write_atom_encoding_prefix(f: &mut dyn Write, atom: &[u8]) -> std::io::Result<()> {
+    let u8_0 = if atom.len() > 0 { atom[0] } else { 0 };
+    write_atom_encoding_prefix_with_size(f, u8_0, atom.len() as u64)
+}
+
+fn encode_size(f: &mut dyn Write, size: u64) -> std::io::Result<()> {
+    write_atom_encoding_prefix_with_size(f, 0xfe, size)
 }
 
 pub fn node_to_stream(node: &Node, f: &mut dyn Write) -> std::io::Result<()> {
@@ -69,18 +85,8 @@ pub fn node_to_stream(node: &Node, f: &mut dyn Write) -> std::io::Result<()> {
         match n {
             SExp::Atom(atom_ptr) => {
                 let atom = a.buf(&atom_ptr);
-                let size = atom.len();
-                if size == 0 {
-                    f.write_all(&[0x80_u8])?;
-                } else {
-                    let atom0 = atom[0];
-                    if size == 1 && (atom0 <= MAX_SINGLE_BYTE) {
-                        f.write_all(&[atom0])?;
-                    } else {
-                        encode_size(f, size as u64)?;
-                        f.write_all(atom)?;
-                    }
-                }
+                write_atom_encoding_prefix(f, atom);
+                f.write_all(atom)?;
             }
             SExp::Pair(left, right) => {
                 f.write_all(&[CONS_BOX_MARKER as u8])?;
@@ -279,10 +285,11 @@ fn push_encoded_atom(r: &mut Vec<u8>, atom: &[u8]) {
     r.extend_from_slice(atom);
 }
 
-pub fn sexp_to_u8_v2(allocator: &Allocator, node: NodePtr) -> Vec<u8> {
+pub fn node_to_stream_backrefs(node: &Node, /*, f: &mut dyn Write*/) -> std::io::Result<Vec<u8>> {
+    let allocator = node.allocator;
     let mut r = vec![];
     let mut read_op_stack: Vec<ReadOp> = vec![ReadOp::Parse];
-    let mut write_stack: Vec<NodePtr> = vec![node];
+    let mut write_stack: Vec<NodePtr> = vec![node.node];
 
     let mut stack_cache = StackCache::new();
 
@@ -326,7 +333,11 @@ pub fn sexp_to_u8_v2(allocator: &Allocator, node: NodePtr) -> Vec<u8> {
             stack_cache.pop2_and_cons();
         }
     }
-    r
+    Ok(r)
+}
+
+pub fn node_to_bytes_backrefs(node: &Node) -> Vec<u8> {
+    node_to_stream_backrefs(node).unwrap()
 }
 
 #[test]
