@@ -91,7 +91,7 @@ pub fn node_to_stream(node: &Node, f: &mut dyn io::Write) -> io::Result<()> {
 /// decode the length prefix for an atom. Atoms whose value fit in 7 bits
 /// don't have a length prefix, so those should be handled specially and
 /// never passed to this function.
-fn decode_size(f: &mut dyn io::Read, initial_b: u8) -> io::Result<u64> {
+fn decode_size<R: io::Read>(f: &mut R, initial_b: u8) -> io::Result<(usize, usize)> {
     debug_assert!((initial_b & 0x80) != 0);
     if (initial_b & 0x80) == 0 {
         return Err(internal_error());
@@ -113,18 +113,18 @@ fn decode_size(f: &mut dyn io::Read, initial_b: u8) -> io::Result<u64> {
         f.read_exact(remaining_buffer)?;
     }
     // need to convert size_blob to an int
-    let mut v: u64 = 0;
+    let mut v: usize = 0;
     if size_blob.len() > 6 {
         return Err(bad_encoding());
     }
     for b in &size_blob {
         v <<= 8;
-        v += *b as u64;
+        v += *b as usize;
     }
     if v >= 0x400000000 {
         return Err(bad_encoding());
     }
-    Ok(v)
+    Ok((bit_count, v))
 }
 
 enum ParseOp {
@@ -157,8 +157,8 @@ pub fn node_from_stream(allocator: &mut Allocator, f: &mut Cursor<&[u8]>) -> io:
                 } else if b[0] <= MAX_SINGLE_BYTE {
                     values.push(allocator.new_atom(&b)?);
                 } else {
-                    let blob_size = decode_size(f, b[0])?;
-                    if (f.get_ref().len() as u64) < blob_size {
+                    let (_prefix_size, blob_size) = decode_size(f, b[0])?;
+                    if (f.get_ref().len()) < blob_size {
                         return Err(bad_encoding());
                     }
                     let mut blob: Vec<u8> = vec![0; blob_size as usize];
@@ -215,7 +215,7 @@ pub fn serialized_length_from_bytes(b: &[u8]) -> io::Result<u64> {
                     // or the
                     // special case of NIL
                 } else {
-                    let blob_size = decode_size(&mut f, b[0])?;
+                    let (_prefix_size, blob_size) = decode_size(&mut f, b[0])?;
                     f.seek(SeekFrom::Current(blob_size as i64))?;
                     if (f.get_ref().len() as u64) < f.position() {
                         return Err(bad_encoding());
@@ -394,12 +394,12 @@ fn test_write_atom() {
 fn test_decode_size() {
     // single-byte length prefix
     let mut buffer = Cursor::new(&[]);
-    assert_eq!(decode_size(&mut buffer, 0x80 | 0x20).unwrap(), 0x20);
+    assert_eq!(decode_size(&mut buffer, 0x80 | 0x20).unwrap(), (1, 0x20));
 
     // two-byte length prefix
     let first = 0b11001111;
     let mut buffer = Cursor::new(&[0xaa]);
-    assert_eq!(decode_size(&mut buffer, first).unwrap(), 0xfaa);
+    assert_eq!(decode_size(&mut buffer, first).unwrap(), (2, 0xfaa));
 }
 
 #[test]
@@ -426,7 +426,7 @@ fn test_large_decode_size() {
     // Still a very large blob, probably enough for a DoS attack
     let first = 0b11111100;
     let mut buffer = Cursor::new(&[0x3, 0xff, 0xff, 0xff, 0xff]);
-    assert_eq!(decode_size(&mut buffer, first).unwrap(), 0x3ffffffff);
+    assert_eq!(decode_size(&mut buffer, first).unwrap(), (6, 0x3ffffffff));
 }
 
 #[test]
