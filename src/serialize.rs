@@ -88,6 +88,101 @@ pub fn node_to_stream(node: &Node, f: &mut dyn io::Write) -> io::Result<()> {
     Ok(())
 }
 
+pub enum ParsedClvmObject {
+    Atom {
+        start: usize,
+        end: usize,
+        atom_offset: u32,
+    },
+    Pair {
+        start: usize,
+        end: usize,
+        right_index: u32,
+    },
+}
+
+enum ParseOpZ {
+    ParseObj,
+    SaveCursor(usize),
+    SaveIndex(usize),
+}
+
+/// parse
+pub fn parse_zz<R: io::Read>(f: &mut R) -> io::Result<Vec<ParsedClvmObject>> {
+    let mut r = Vec::new();
+    let mut op_stack = vec![ParseOpZ::ParseObj];
+    let mut cursor: usize = 0;
+    loop {
+        match op_stack.pop() {
+            None => {
+                break;
+            }
+            Some(op) => match op {
+                ParseOpZ::ParseObj => {
+                    let mut b: [u8; 1] = [0];
+                    f.read_exact(&mut b)?;
+                    cursor += 1;
+                    let b = b[0];
+                    if b == CONS_BOX_MARKER {
+                        let index = r.len();
+                        let new_obj = ParsedClvmObject::Pair {
+                            start: cursor,
+                            end: 0,
+                            right_index: 0,
+                        };
+                        r.push(new_obj);
+                        op_stack.push(ParseOpZ::SaveCursor(index));
+                        op_stack.push(ParseOpZ::ParseObj);
+                        op_stack.push(ParseOpZ::SaveIndex(index));
+                        op_stack.push(ParseOpZ::ParseObj);
+                    } else {
+                        let (atom_offset, atom_size) = decode_size(f, b)?;
+                        let mut garbage: Vec<u8> = vec![0; atom_size];
+                        f.read_exact(&mut garbage)?;
+                        let final_cursor = cursor + atom_offset + atom_size;
+                        let new_obj = ParsedClvmObject::Atom {
+                            start: cursor,
+                            end: final_cursor,
+                            atom_offset: atom_offset as u32,
+                        };
+                        cursor = final_cursor;
+                        r.push(new_obj);
+                    }
+                }
+                ParseOpZ::SaveCursor(index) => {
+                    if let ParsedClvmObject::Pair {
+                        start,
+                        end: _,
+                        right_index,
+                    } = r[index]
+                    {
+                        r[index] = ParsedClvmObject::Pair {
+                            start,
+                            end: cursor,
+                            right_index,
+                        };
+                    }
+                }
+                ParseOpZ::SaveIndex(index) => {
+                    if let ParsedClvmObject::Pair {
+                        start,
+                        end,
+                        right_index: _,
+                    } = r[index]
+                    {
+                        r[index] = ParsedClvmObject::Pair {
+                            start,
+                            end,
+                            right_index: r.len() as u32,
+                        };
+                    }
+                }
+            },
+        }
+    }
+    Ok(r)
+}
+
 /// decode the length prefix for an atom. Atoms whose value fit in 7 bits
 /// don't have a length prefix, so those should be handled specially and
 /// never passed to this function.
