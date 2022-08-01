@@ -88,7 +88,11 @@ pub fn node_to_stream(node: &Node, f: &mut dyn io::Write) -> io::Result<()> {
     Ok(())
 }
 
-pub enum ParsedClvmObject {
+/// This data structure is used with `parse_triples`, which returns a triple of
+/// integer values for each clvm object in a tree.
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ParsedTriple {
     Atom {
         start: usize,
         end: usize,
@@ -101,16 +105,32 @@ pub enum ParsedClvmObject {
     },
 }
 
-enum ParseOpZ {
+enum ParseOpRef {
     ParseObj,
     SaveCursor(usize),
     SaveIndex(usize),
 }
 
-/// parse
-pub fn parse_zz<R: io::Read>(f: &mut R) -> io::Result<Vec<ParsedClvmObject>> {
+fn skip_bytes<R: io::Read>(f: &mut R, skip_size: usize) -> io::Result<u64> {
+    io::copy(&mut f.by_ref().take(skip_size as u64), &mut io::sink())
+}
+
+/// parse a serialized clvm object tree to an array of `ParsedTriple` objects
+
+/// This alternative mechanism of deserialization generates an array of
+/// references to each clvm object. A reference contains three values:
+/// a start offset within the blob, an end offset, and a third value that
+/// is either: an atom offset (relative to the start offset) where the atom
+/// data starts (and continues to the end offset); or an index in the array
+/// corresponding to the "right" element of the pair (in which case, the
+/// "left" element corresponds to the next index in the array).
+///
+/// Since these values are offsets into the original buffer, that buffer needs
+/// to be kep around to get the original atoms.
+
+pub fn parse_triples<R: io::Read>(f: &mut R) -> io::Result<Vec<ParsedTriple>> {
     let mut r = Vec::new();
-    let mut op_stack = vec![ParseOpZ::ParseObj];
+    let mut op_stack = vec![ParseOpRef::ParseObj];
     let mut cursor: usize = 0;
     loop {
         match op_stack.pop() {
@@ -118,30 +138,39 @@ pub fn parse_zz<R: io::Read>(f: &mut R) -> io::Result<Vec<ParsedClvmObject>> {
                 break;
             }
             Some(op) => match op {
-                ParseOpZ::ParseObj => {
+                ParseOpRef::ParseObj => {
                     let mut b: [u8; 1] = [0];
                     f.read_exact(&mut b)?;
+                    let start = cursor;
                     cursor += 1;
                     let b = b[0];
                     if b == CONS_BOX_MARKER {
                         let index = r.len();
-                        let new_obj = ParsedClvmObject::Pair {
-                            start: cursor,
+                        let new_obj = ParsedTriple::Pair {
+                            start,
                             end: 0,
                             right_index: 0,
                         };
                         r.push(new_obj);
-                        op_stack.push(ParseOpZ::SaveCursor(index));
-                        op_stack.push(ParseOpZ::ParseObj);
-                        op_stack.push(ParseOpZ::SaveIndex(index));
-                        op_stack.push(ParseOpZ::ParseObj);
+                        op_stack.push(ParseOpRef::SaveCursor(index));
+                        op_stack.push(ParseOpRef::ParseObj);
+                        op_stack.push(ParseOpRef::SaveIndex(index));
+                        op_stack.push(ParseOpRef::ParseObj);
                     } else {
-                        let (atom_offset, atom_size) = decode_size(f, b)?;
-                        let mut garbage: Vec<u8> = vec![0; atom_size];
-                        f.read_exact(&mut garbage)?;
-                        let final_cursor = cursor + atom_offset + atom_size;
-                        let new_obj = ParsedClvmObject::Atom {
-                            start: cursor,
+                        let (atom_offset, atom_size) = {
+                            if b & 0x80 == 0 {
+                                (0, 1)
+                            } else {
+                                decode_size(f, b)?
+                            }
+                        };
+
+                        let skip_size = atom_offset + atom_size - 1;
+                        skip_bytes(f, skip_size)?;
+
+                        let final_cursor = cursor + skip_size;
+                        let new_obj = ParsedTriple::Atom {
+                            start,
                             end: final_cursor,
                             atom_offset: atom_offset as u32,
                         };
@@ -149,28 +178,28 @@ pub fn parse_zz<R: io::Read>(f: &mut R) -> io::Result<Vec<ParsedClvmObject>> {
                         r.push(new_obj);
                     }
                 }
-                ParseOpZ::SaveCursor(index) => {
-                    if let ParsedClvmObject::Pair {
+                ParseOpRef::SaveCursor(index) => {
+                    if let ParsedTriple::Pair {
                         start,
                         end: _,
                         right_index,
                     } = r[index]
                     {
-                        r[index] = ParsedClvmObject::Pair {
+                        r[index] = ParsedTriple::Pair {
                             start,
                             end: cursor,
                             right_index,
                         };
                     }
                 }
-                ParseOpZ::SaveIndex(index) => {
-                    if let ParsedClvmObject::Pair {
+                ParseOpRef::SaveIndex(index) => {
+                    if let ParsedTriple::Pair {
                         start,
                         end,
                         right_index: _,
                     } = r[index]
                     {
-                        r[index] = ParsedClvmObject::Pair {
+                        r[index] = ParsedTriple::Pair {
                             start,
                             end,
                             right_index: r.len() as u32,
@@ -532,4 +561,90 @@ fn test_truncated_decode_size() {
     let ret = decode_size(&mut buffer, first);
     let e = ret.unwrap_err();
     assert_eq!(e.kind(), ErrorKind::UnexpectedEof);
+}
+
+#[cfg(test)]
+use hex::FromHex;
+
+#[cfg(test)]
+fn check_parse_triple(h: &str, expected: Vec<ParsedTriple>) -> () {
+    let b = Vec::from_hex(h).unwrap();
+    println!("{:?}", b);
+    let mut f = Cursor::new(b);
+    let p = parse_triples(&mut f).unwrap();
+    assert_eq!(p, expected);
+}
+
+#[test]
+fn test_parse_triple() {
+    check_parse_triple(
+        "80",
+        vec![ParsedTriple::Atom {
+            start: 0,
+            end: 1,
+            atom_offset: 1,
+        }],
+    );
+
+    check_parse_triple(
+        "ff648200c8",
+        vec![
+            ParsedTriple::Pair {
+                start: 0,
+                end: 5,
+                right_index: 2,
+            },
+            ParsedTriple::Atom {
+                start: 1,
+                end: 2,
+                atom_offset: 0,
+            },
+            ParsedTriple::Atom {
+                start: 2,
+                end: 5,
+                atom_offset: 1,
+            },
+        ],
+    );
+
+    check_parse_triple(
+        "ff83666f6fff83626172ff8362617a80", // `(foo bar baz)`
+        vec![
+            ParsedTriple::Pair {
+                start: 0,
+                end: 16,
+                right_index: 2,
+            },
+            ParsedTriple::Atom {
+                start: 1,
+                end: 5,
+                atom_offset: 1,
+            },
+            ParsedTriple::Pair {
+                start: 5,
+                end: 16,
+                right_index: 4,
+            },
+            ParsedTriple::Atom {
+                start: 6,
+                end: 10,
+                atom_offset: 1,
+            },
+            ParsedTriple::Pair {
+                start: 10,
+                end: 16,
+                right_index: 6,
+            },
+            ParsedTriple::Atom {
+                start: 11,
+                end: 15,
+                atom_offset: 1,
+            },
+            ParsedTriple::Atom {
+                start: 15,
+                end: 16,
+                atom_offset: 1,
+            },
+        ],
+    );
 }
