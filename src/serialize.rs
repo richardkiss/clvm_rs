@@ -126,7 +126,7 @@ fn skip_bytes<R: io::Read>(f: &mut R, skip_size: usize) -> io::Result<u64> {
 /// "left" element corresponds to the next index in the array).
 ///
 /// Since these values are offsets into the original buffer, that buffer needs
-/// to be kep around to get the original atoms.
+/// to be kept around to get the original atoms.
 
 pub fn parse_triples<R: io::Read>(f: &mut R) -> io::Result<Vec<ParsedTriple>> {
     let mut r = Vec::new();
@@ -157,24 +157,22 @@ pub fn parse_triples<R: io::Read>(f: &mut R) -> io::Result<Vec<ParsedTriple>> {
                         op_stack.push(ParseOpRef::SaveIndex(index));
                         op_stack.push(ParseOpRef::ParseObj);
                     } else {
-                        let (atom_offset, atom_size) = {
-                            if b & 0x80 == 0 {
-                                (0, 1)
+                        let (start, end, atom_offset) = {
+                            if b <= MAX_SINGLE_BYTE {
+                                (cursor, cursor + 1, 0)
                             } else {
-                                decode_size(f, b)?
+                                let (atom_offset, atom_size) = decode_size(f, b)?;
+                                skip_bytes(f, atom_size)?;
+                                let end = start + atom_offset + atom_size;
+                                (start, end, atom_size as u32)
                             }
                         };
-
-                        let skip_size = atom_offset + atom_size - 1;
-                        skip_bytes(f, skip_size)?;
-
-                        let final_cursor = cursor + skip_size;
                         let new_obj = ParsedTriple::Atom {
                             start,
-                            end: final_cursor,
-                            atom_offset: atom_offset as u32,
+                            end,
+                            atom_offset,
                         };
-                        cursor = final_cursor;
+                        cursor = end;
                         r.push(new_obj);
                     }
                 }
@@ -646,5 +644,17 @@ fn test_parse_triple() {
                 atom_offset: 1,
             },
         ],
+    );
+
+    check_parse_triple(
+        "c0a03131313131313131313131313131313131313131313131313131313131313131313131313131\
+         31313131313131313131313131313131313131313131313131313131313131313131313131313131\
+         31313131313131313131313131313131313131313131313131313131313131313131313131313131\
+         313131313131313131313131313131313131313131313131313131313131313131313131313131313131",
+        vec![ParsedTriple::Atom {
+            start: 0,
+            end: 5,
+            atom_offset: 2,
+        }],
     );
 }
