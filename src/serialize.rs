@@ -159,7 +159,7 @@ pub fn parse_triples<R: io::Read>(f: &mut R) -> io::Result<Vec<ParsedTriple>> {
                     } else {
                         let (start, end, atom_offset) = {
                             if b <= MAX_SINGLE_BYTE {
-                                (cursor, cursor + 1, 0)
+                                (start, start+1, 0)
                             } else {
                                 let (atom_offset, atom_size) = decode_size(f, b)?;
                                 skip_bytes(f, atom_size)?;
