@@ -1,4 +1,5 @@
 mod bytes32;
+mod bytes32_hasher;
 mod de;
 mod de_br;
 mod de_tree;

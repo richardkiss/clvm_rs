@@ -18,6 +18,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::bytes32::{hash_blob, hash_blobs, Bytes32};
+use super::bytes32_hasher::Bytes32Hasher;
 
 #[derive(Debug)]
 pub struct ReadCacheLookup {
@@ -28,10 +29,10 @@ pub struct ReadCacheLookup {
     /// the tree hashes of the contents on the left and right
     read_stack: Vec<(Bytes32, Bytes32)>,
 
-    count: HashMap<Bytes32, u32>,
+    count: HashMap<Bytes32, u32, Bytes32Hasher>,
 
     /// a mapping of tree hashes to `(parent, is_right)` tuples
-    parent_lookup: HashMap<Bytes32, Vec<(Bytes32, u8)>>,
+    parent_lookup: HashMap<Bytes32, Vec<(Bytes32, u8)>, Bytes32Hasher>,
 }
 
 impl Default for ReadCacheLookup {
