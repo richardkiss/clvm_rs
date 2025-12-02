@@ -16,7 +16,6 @@ fn treehash_for_node(allocator: &Allocator, node: NodePtr) -> Bytes32 {
 
 /// Helper to convert hex string to bytes
 /// Supports whitespace and newlines which are stripped
-
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
     let hex_clean = hex.trim().replace(" ", "").replace("\n", "");
     hex_clean
@@ -31,23 +30,20 @@ fn hex_to_bytes(hex: &str) -> Vec<u8> {
 }
 
 /// Helper to convert hex string directly to a node
-
 fn hex_to_node(allocator: &mut Allocator, hex: &str) -> Result<crate::allocator::NodePtr> {
     let bytes = hex_to_bytes(hex);
     node_from_bytes_backrefs(allocator, &bytes)
 }
 
 /// Helper to deserialize hex and create interned version, returning intern stats
-
 fn test_hex_interning(hex: &str, expected_atoms: usize, expected_pairs: usize) -> Result<()> {
     let mut allocator = Allocator::new();
 
     // Deserialize from hex
     let node = hex_to_node(&mut allocator, hex)?;
 
-    // Create interned version and capture intern counts
-    let (new_allocator, interned_node, intern_atom_count, intern_pair_count) =
-        create_interned_node(&allocator, node)?;
+    // Create interned version and capture visit counts
+    let (new_allocator, interned_node, counts) = create_interned_node(&allocator, node)?;
 
     // ensure interned node serializes to same bytes
     let original_serialized = node_to_bytes(&allocator, node)?;
@@ -65,7 +61,22 @@ fn test_hex_interning(hex: &str, expected_atoms: usize, expected_pairs: usize) -
         "Treehashes do not match after interning."
     );
 
-    // Verify intern stats
+    // Calculate unique atom and pair counts from visit counts
+    let mut intern_atom_count = 0;
+    let mut total_atom_count = 0;
+    let mut intern_pair_count = 0;
+    let mut total_pair_count = 0;
+    for (node, count) in counts {
+        if !node.is_pair() {
+            intern_atom_count += 1;
+            total_atom_count += count;
+        } else {
+            intern_pair_count += 1;
+            total_pair_count += count;
+        }
+    }
+
+    // Verify unique intern stats
     assert_eq!(
         intern_atom_count, expected_atoms,
         "Intern atom count doesn't match expected.\nGot:      {:?}\nExpected: {:?}",
@@ -75,6 +86,13 @@ fn test_hex_interning(hex: &str, expected_atoms: usize, expected_pairs: usize) -
         intern_pair_count, expected_pairs,
         "Intern pair count doesn't match expected.\nGot:      {:?}\nExpected: {:?}",
         intern_pair_count, expected_pairs
+    );
+
+    // Verify visit count invariant: total_atoms == total_pairs + 1
+    assert_eq!(
+        total_atom_count,
+        total_pair_count + 1,
+        "Visit count invariant failed: total_atoms should equal total_pairs + 1"
     );
 
     Ok(())
