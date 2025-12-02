@@ -1,5 +1,6 @@
 mod bitset;
 mod bytes32;
+mod cost;
 mod de;
 mod de_br;
 mod de_tree;
@@ -24,6 +25,7 @@ mod test;
 mod test_intern;
 
 pub use bitset::BitSet;
+pub use cost::{cost_and_tree_hash_for_bytes, tree_hash_cost};
 pub use de::node_from_bytes;
 pub use de_br::{node_from_bytes_backrefs, node_from_bytes_backrefs_old};
 pub use de_tree::{parse_triples, ParsedTriple};
