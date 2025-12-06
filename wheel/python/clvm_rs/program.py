@@ -4,7 +4,7 @@ from typing import Iterator, List, Tuple, Optional, BinaryIO
 from .at import at
 from .casts import CastableType, to_clvm_object, int_from_bytes, int_to_bytes
 from .chia_dialect import CHIA_DIALECT
-from .clvm_rs import run_serialized_chia_program
+from .clvm_rs import run_serialized_chia_program, deserialize_with_backrefs, serialize_with_backrefs
 from .clvm_storage import CLVMStorage
 from .clvm_tree import CLVMTree
 from .curry_and_treehash import CurryTreehasher
@@ -35,11 +35,42 @@ class Program(CLVMStorage):
         sexp_to_stream(self, f)
 
     @classmethod
-    def from_bytes(cls, blob: bytes, calculate_tree_hash: bool = True) -> Program:
-        obj, cursor = cls.from_bytes_with_cursor(
-            blob, 0, calculate_tree_hash=calculate_tree_hash
-        )
-        return obj
+    def from_bytes(cls, blob: bytes, calculate_tree_hash: bool = True, allow_backrefs: bool = False) -> Program:
+        """
+        Deserialize from CLVM format.
+
+        By default, uses optimized CLVMTree deserialization (standard format only).
+        Set allow_backrefs=True to accept compressed format with 0xfe back-reference
+        tokens (slower, but supports compression).
+
+        Args:
+            blob: Serialized CLVM data
+            calculate_tree_hash: Whether to compute SHA256 tree hash during parsing
+            allow_backrefs: If True, accept compressed format with 0xfe tokens (slower)
+
+        Returns:
+            Program object
+
+        Raises:
+            ValueError: If deserialization fails
+
+        Example:
+            >>> # Fast path - standard format only (default)
+            >>> p1 = Program.from_bytes(standard_blob)
+            >>>
+            >>> # Slower path - accepts compressed format
+            >>> p2 = Program.from_bytes(compressed_blob, allow_backrefs=True)
+        """
+        if allow_backrefs:
+            # Slower: LazyNode path, supports back-references
+            lazy_node = deserialize_with_backrefs(blob)
+            return cls.wrap(lazy_node)
+        else:
+            # Fast: CLVMTree with tree hash optimization (standard format only)
+            obj, cursor = cls.from_bytes_with_cursor(
+                blob, 0, calculate_tree_hash=calculate_tree_hash
+            )
+            return obj
 
     @classmethod
     def from_bytes_with_cursor(
@@ -62,6 +93,40 @@ class Program(CLVMStorage):
         if not isinstance(self._cached_serialization, bytes):
             self._cached_serialization = bytes(self._cached_serialization)
         return self._cached_serialization
+
+    def to_bytes_compressed(self) -> bytes:
+        """
+        Serialize to compressed CLVM format with back-references.
+
+        This format uses 0xfe tokens to reference previously serialized subtrees,
+        resulting in smaller output when there are repeated structures. The
+        serializer automatically identifies opportunities for back-references
+        and only uses them when they provide space savings.
+
+        Returns:
+            Compressed serialized bytes
+
+        Note:
+            The output can be parsed with Program.from_bytes() (the default mode
+            accepts back-references). To get standard format, use bytes(program).
+
+        Example:
+            >>> leaf = Program.to(b"x" * 100)
+            >>> tree = Program.to([leaf, leaf, leaf])
+            >>>
+            >>> standard = bytes(tree)
+            >>> compressed = tree.to_bytes_compressed()
+            >>> print(f"Standard: {len(standard)}, Compressed: {len(compressed)}")
+            Standard: 318, Compressed: 130
+            >>>
+            >>> # Both can be parsed by from_bytes()
+            >>> Program.from_bytes(standard) == Program.from_bytes(compressed)
+            True
+        """
+        # Convert to LazyNode representation and serialize with backrefs
+        temp_bytes = bytes(self)
+        lazy_node = deserialize_with_backrefs(temp_bytes)
+        return serialize_with_backrefs(lazy_node)
 
     def __int__(self) -> int:
         v = self.as_int()

@@ -19,6 +19,13 @@ target/
 # python ignore
 /venv
 /.venv
+__pycache__/
+*.pyc
+*.pyo
+*.so
+*.egg-info/
+dist/
+build/
 
 # Node.js
 /target
