@@ -1,20 +1,22 @@
 import blspy
 from random import randbytes, randint, seed, sample
 
+
 def bytes_in_atom(n: int) -> int:
     if n == 0:
         return 0
-    if n <= 0x7f:
+    if n <= 0x7F:
         return 1
-    if n <= 0x7fff:
+    if n <= 0x7FFF:
         return 2
-    if n <= 0x7fffff:
+    if n <= 0x7FFFFF:
         return 3
-    if n <= 0x7fffffff:
+    if n <= 0x7FFFFFFF:
         return 4
-    if n <= 0x7fffffffff:
+    if n <= 0x7FFFFFFFFF:
         return 5
     assert False
+
 
 def flip_bit(b: bytes) -> bytearray:
     idx = randint(0, len(b) - 1)
@@ -23,8 +25,11 @@ def flip_bit(b: bytes) -> bytearray:
     ret[idx] ^= bit
     return ret
 
-def print_validation_test_case(f1, f2, num_cases, filter_pk, filter_msg, filter_sig, expect: str):
-    sks = sample(secret_keys, randint(1,min(10, num_cases)))
+
+def print_validation_test_case(
+    f1, f2, num_cases, filter_pk, filter_msg, filter_sig, expect: str
+):
+    sks = sample(secret_keys, randint(1, min(10, num_cases)))
     cost = 3000000
     messages = []
     sigs = []
@@ -32,7 +37,7 @@ def print_validation_test_case(f1, f2, num_cases, filter_pk, filter_msg, filter_
     args = ""
     for sk in sks:
         pk = sk.get_g1()
-        msg = randbytes(randint(3,40))
+        msg = randbytes(randint(3, 40))
         cost += len(msg) * 4 + 43 * 4
         cost += 1200000
         messages.append(msg)
@@ -108,7 +113,9 @@ with open("../op-tests/test-blspy-g1.txt", "w+") as f:
 
         cost = 101094 + 1343980 * 2 + 48 * 10
         result = aggregate + g1
-        f.write(f"g1_add 0x{bytes(aggregate).hex()} 0x{bytes(g1).hex()} => 0x{bytes(result).hex()} | {cost}\n")
+        f.write(
+            f"g1_add 0x{bytes(aggregate).hex()} 0x{bytes(g1).hex()} => 0x{bytes(result).hex()} | {cost}\n"
+        )
 
         aggregate = result
 
@@ -121,7 +128,9 @@ with open("../op-tests/test-blspy-g1.txt", "w+") as f:
 
         cost = 101094 + 1343980 * 2 + 48 * 10
         result = aggregate + g1.negate()
-        f.write(f"g1_subtract 0x{bytes(aggregate).hex()} 0x{bytes(g1).hex()} => 0x{bytes(result).hex()} | {cost}\n")
+        f.write(
+            f"g1_subtract 0x{bytes(aggregate).hex()} 0x{bytes(g1).hex()} => 0x{bytes(result).hex()} | {cost}\n"
+        )
 
         aggregate = result
 
@@ -138,11 +147,12 @@ with open("../op-tests/test-blspy-g1.txt", "w+") as f:
         else:
             for i in range(scalar):
                 result += g1
-        f.write(f"g1_multiply 0x{bytes(g1).hex()} {scalar} => 0x{bytes(result).hex()} | {cost}\n")
+        f.write(
+            f"g1_multiply 0x{bytes(g1).hex()} {scalar} => 0x{bytes(result).hex()} | {cost}\n"
+        )
 
     # g1_negate
     for g1 in g1_points:
-
         cost = 1396
         result = g1.negate()
         f.write(f"g1_negate 0x{bytes(g1).hex()} => 0x{bytes(result).hex()} | {cost}\n")
@@ -161,10 +171,11 @@ with open("../op-tests/test-blspy-g2.txt", "w+") as f:
 
         cost = 80000 + 1950000 * 2 + 96 * 10
         result = aggregate + g2
-        f.write(f"g2_add 0x{bytes(aggregate).hex()} 0x{bytes(g2).hex()} => 0x{bytes(result).hex()} | {cost}\n")
+        f.write(
+            f"g2_add 0x{bytes(aggregate).hex()} 0x{bytes(g2).hex()} => 0x{bytes(result).hex()} | {cost}\n"
+        )
 
         aggregate = result
-
 
     # g2_subtract
     aggregate = None
@@ -175,7 +186,9 @@ with open("../op-tests/test-blspy-g2.txt", "w+") as f:
 
         cost = 80000 + 1950000 * 2 + 96 * 10
         result = aggregate + g2.negate()
-        f.write(f"g2_subtract 0x{bytes(aggregate).hex()} 0x{bytes(g2).hex()} => 0x{bytes(result).hex()} | {cost}\n")
+        f.write(
+            f"g2_subtract 0x{bytes(aggregate).hex()} 0x{bytes(g2).hex()} => 0x{bytes(result).hex()} | {cost}\n"
+        )
 
         aggregate = result
 
@@ -192,11 +205,12 @@ with open("../op-tests/test-blspy-g2.txt", "w+") as f:
         else:
             for i in range(scalar):
                 result += g2
-        f.write(f"g2_multiply 0x{bytes(g2).hex()} {scalar} => 0x{bytes(result).hex()} | {cost}\n")
+        f.write(
+            f"g2_multiply 0x{bytes(g2).hex()} {scalar} => 0x{bytes(result).hex()} | {cost}\n"
+        )
 
     # g2_negate
     for g2 in g2_points:
-
         cost = 2164
         result = g2.negate()
         f.write(f"g2_negate 0x{bytes(g2).hex()} => 0x{bytes(result).hex()} | {cost}\n")
@@ -208,49 +222,72 @@ with open("../op-tests/test-blspy-hash.txt", "w+") as f:
 
     # g1_map
     for i in range(SIZE):
-        msg = randbytes(randint(3,40))
-        g1 = blspy.G1Element.from_message(msg, "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_AUG_")
+        msg = randbytes(randint(3, 40))
+        g1 = blspy.G1Element.from_message(
+            msg, "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_AUG_"
+        )
         cost = 195000 + len(msg) * 4 + 43 * 4 + 48 * 10
-        f.write(f"g1_map 0x{bytes(msg).hex()} \"BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_AUG_\" => 0x{bytes(g1).hex()} | {cost}\n")
+        f.write(
+            f'g1_map 0x{bytes(msg).hex()} "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_AUG_" => 0x{bytes(g1).hex()} | {cost}\n'
+        )
         f.write(f"g1_map 0x{bytes(msg).hex()} => 0x{bytes(g1).hex()} | {cost}\n")
-        g1 = blspy.G1Element.from_message(msg, "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_")
-        f.write(f"g1_map 0x{bytes(msg).hex()} \"BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_\" => 0x{bytes(g1).hex()} | {cost}\n")
+        g1 = blspy.G1Element.from_message(
+            msg, "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_"
+        )
+        f.write(
+            f'g1_map 0x{bytes(msg).hex()} "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_" => 0x{bytes(g1).hex()} | {cost}\n'
+        )
 
     # g2_map
     for i in range(SIZE):
-        msg = randbytes(randint(3,40))
+        msg = randbytes(randint(3, 40))
         g2 = blspy.AugSchemeMPL.g2_from_message(msg)
         cost = 815000 + len(msg) * 4 + 43 * 4 + 96 * 10
-        f.write(f"g2_map 0x{bytes(msg).hex()} \"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_AUG_\" => 0x{bytes(g2).hex()} | {cost}\n")
+        f.write(
+            f'g2_map 0x{bytes(msg).hex()} "BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_AUG_" => 0x{bytes(g2).hex()} | {cost}\n'
+        )
         # this scheme is the default, and doesn't need to be specified
         # it has the same cost
         f.write(f"g2_map 0x{bytes(msg).hex()} => 0x{bytes(g2).hex()} | {cost}\n")
 
         g2 = blspy.BasicSchemeMPL.g2_from_message(msg)
-        f.write(f"g2_map 0x{bytes(msg).hex()} \"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_\" => 0x{bytes(g2).hex()} | {cost}\n")
+        f.write(
+            f'g2_map 0x{bytes(msg).hex()} "BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_NUL_" => 0x{bytes(g2).hex()} | {cost}\n'
+        )
 
         g2 = blspy.PopSchemeMPL.g2_from_message(msg)
-        f.write(f"g2_map 0x{bytes(msg).hex()} \"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_\" => 0x{bytes(g2).hex()} | {cost}\n")
+        f.write(
+            f'g2_map 0x{bytes(msg).hex()} "BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_" => 0x{bytes(g2).hex()} | {cost}\n'
+        )
 
-with open("../op-tests/test-blspy-verify.txt", "w+") as f1, \
-    open("../op-tests/test-blspy-pairing.txt", "w+") as f2:
+with (
+    open("../op-tests/test-blspy-verify.txt", "w+") as f1,
+    open("../op-tests/test-blspy-pairing.txt", "w+") as f2,
+):
     f1.write("; This file was generated by tools/generate-bls-tests.py\n\n")
     f2.write("; This file was generated by tools/generate-bls-tests.py\n\n")
-
 
     # bls_verify
     # bls_pairing_identity
     for k in range(SIZE // 2):
-        print_validation_test_case(f1, f2, SIZE, lambda pk: pk, lambda msg: msg, lambda sig: sig, "0")
+        print_validation_test_case(
+            f1, f2, SIZE, lambda pk: pk, lambda msg: msg, lambda sig: sig, "0"
+        )
 
     # negative tests (alter public key)
     for k in range(5):
-        print_validation_test_case(f1, f2, 3, lambda pk: pk.negate(), lambda msg: msg, lambda sig: sig, "FAIL")
+        print_validation_test_case(
+            f1, f2, 3, lambda pk: pk.negate(), lambda msg: msg, lambda sig: sig, "FAIL"
+        )
 
     # negative tests (alter message)
     for k in range(5):
-        print_validation_test_case(f1, f2, 3, lambda pk: pk, flip_bit, lambda sig: sig, "FAIL")
+        print_validation_test_case(
+            f1, f2, 3, lambda pk: pk, flip_bit, lambda sig: sig, "FAIL"
+        )
 
     # negative tests (alter signature)
     for k in range(5):
-        print_validation_test_case(f1, f2, 3, lambda pk: pk, lambda msg: msg, lambda sig: sig.negate(), "FAIL")
+        print_validation_test_case(
+            f1, f2, 3, lambda pk: pk, lambda msg: msg, lambda sig: sig.negate(), "FAIL"
+        )

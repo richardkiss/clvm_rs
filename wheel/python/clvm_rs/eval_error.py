@@ -1,5 +1,6 @@
 from .ser import sexp_to_bytes
 
+
 class EvalError(ValueError):
     def __init__(self, message: str, sexp):
         super().__init__(message)

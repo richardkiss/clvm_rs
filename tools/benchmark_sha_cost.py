@@ -274,7 +274,7 @@ def analyze_results(results_by_size: dict[int, List[float]]) -> None:
 
     block_groups = {}
     for size in sizes:
-        blocks = sha_block_for_size (size)
+        blocks = sha_block_for_size(size)
         if blocks not in block_groups:
             block_groups[blocks] = []
         block_groups[blocks].extend(results_by_size[size])
@@ -327,7 +327,7 @@ def validate_sha_boundaries(results_by_size: dict[int, List[float]]) -> None:
 
         measurements = {}
         for size in available_sizes:
-            sha_blocks =  sha_block_for_size(size)[0]
+            sha_blocks = sha_block_for_size(size)[0]
             avg_time_ns = np.median(results_by_size[size])
             measurements[size] = (sha_blocks, avg_time_ns)
 
@@ -482,7 +482,7 @@ def report_results(
     ratio = ns_per_invocation / ns_per_block
 
     # Check for invalid adjusted values
-    if ns_per_invocation_adjusted  <= 0:
+    if ns_per_invocation_adjusted <= 0:
         print(
             f"\n⚠️  WARNING: Adjusted per-block cost is {ns_per_invocation_adjusted:.2f} ns (non-positive!)"
         )
@@ -498,9 +498,7 @@ def report_results(
         ratio_adjusted = ns_per_invocation_adjusted / ns_per_block
 
     print("\nRaw measurements (including Python overhead):")
-    print(
-        f"  wall_time_ns = {ns_per_block:.2f} * sha_blocks + {ns_per_invocation:.2f}"
-    )
+    print(f"  wall_time_ns = {ns_per_block:.2f} * sha_blocks + {ns_per_invocation:.2f}")
 
     print(
         f"\nAdjusted measurements (Python overhead removed: {median_overhead:.2f} ns):"

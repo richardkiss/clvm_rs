@@ -14,7 +14,6 @@ from .ser import sexp_from_stream, sexp_to_stream, sexp_to_bytes
 from .tree_hash import sha256_treehash
 
 
-
 class Program(CLVMStorage):
     """
     A wrapper around `CLVMStorage` providing many convenience functions.
