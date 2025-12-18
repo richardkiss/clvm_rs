@@ -1,5 +1,6 @@
 pub mod allocator;
 pub mod bls_ops;
+pub mod chia;
 pub mod chia_dialect;
 pub mod core_ops;
 pub mod cost;
@@ -20,6 +21,9 @@ pub mod traverse_path;
 pub use allocator::{Allocator, Atom, NodePtr, ObjectType, SExp};
 pub use chia_dialect::ChiaDialect;
 pub use run_program::run_program;
+
+// Chia-specific exports (will migrate to chia_rs)
+pub use chia::{cost_components, process_generator, CostComponents, GeneratorInfo};
 
 pub use chia_dialect::{ENABLE_KECCAK_OPS_OUTSIDE_GUARD, LIMIT_HEAP, MEMPOOL_MODE, NO_UNKNOWN_OPS};
 

@@ -17,7 +17,17 @@ with open("../op-tests/test-sha256.txt", "w+") as f:
         test_args = []
         for i in range(num_args):
             cost += 134
-            arg = choice([b"", b"\x01", b"\x02", b"foobar", randbytes(24), randbytes(48), randbytes(32)])
+            arg = choice(
+                [
+                    b"",
+                    b"\x01",
+                    b"\x02",
+                    b"foobar",
+                    randbytes(24),
+                    randbytes(48),
+                    randbytes(32),
+                ]
+            )
             cost += len(arg) * 2
             args.append(arg)
             ctx.update(arg)

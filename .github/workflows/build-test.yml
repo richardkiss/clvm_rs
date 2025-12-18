@@ -26,7 +26,7 @@ jobs:
         python: [3.8]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -127,7 +127,7 @@ jobs:
           # ignoring `clvm_rs.so`, which is pretty important)
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: wheels-${{ matrix.os }}-py-${{ matrix.python }}
           path: ./target/wheels/
@@ -138,7 +138,7 @@ jobs:
     needs: build_wheels
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -148,7 +148,7 @@ jobs:
           python-version: "3.10"
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           merge-multiple: true
           pattern: wheels-*
@@ -165,7 +165,7 @@ jobs:
     runs-on: ubuntu-22.04
     name: Checks
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 1
       - name: Set up rusts
@@ -186,7 +186,7 @@ jobs:
         os: [macos-15-intel, ubuntu-latest]
         python: [3.8]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 1
       - name: Set up rusts
@@ -218,7 +218,7 @@ jobs:
         os: [macos-15-intel, ubuntu-latest, windows-latest]
         python: [3.8]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 1
       - name: Set up rusts
@@ -245,7 +245,7 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - name: Run for coverage
         run: |
