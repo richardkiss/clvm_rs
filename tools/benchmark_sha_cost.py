@@ -27,23 +27,34 @@ from dataclasses import dataclass
 
 @dataclass
 class BenchmarkResult:
+    """Data class to store benchmark results with blob size and wall time measurements."""
+
     blob_size: int
     wall_time_ns: float
 
     @property
     def wall_time_us(self) -> float:
+        """Return wall time in microseconds."""
         return self.wall_time_ns / 1000
 
     @property
     def wall_time_ms(self) -> float:
+        """Return wall time in milliseconds."""
         return self.wall_time_ns / 1_000_000
 
 
 def sha_block_for_size(blob_size: int) -> int:
     """
     Estimate SHA blocks for a blob of given size.
+
     Based on cost.rs logic:
     - Atoms have (size + 9) / 64 blocks (9 bytes for SHA256 padding)
+
+    Args:
+        blob_size: Size of the blob in bytes
+
+    Returns:
+        Number of SHA blocks required for the blob
     """
     # For a single atom blob - ceiling division: (a + b - 1) // b
     sha_blocks = (blob_size + 9 + 63) // 64
@@ -64,7 +75,6 @@ def benchmark_function(func, blob_pool: List[bytes], iterations: int) -> list[fl
     Returns:
         Median time in nanoseconds per function call
     """
-
     pool_size = len(blob_pool)
     trials = []
 
@@ -92,10 +102,19 @@ def benchmark_overhead(
     Measure Python loop overhead with blob indexing and parameter passing.
     Used to subtract driver overhead from SHA benchmark results.
     Calls benchmark_function with a no-op to measure exact same overhead.
+
+    Args:
+        blob_pool: List of pre-generated blobs to cycle through
+        iterations: Number of iterations per trial
+        num_trials: Number of trials to run
+
+    Returns:
+        List of timing measurements in nanoseconds
     """
 
     # Define a no-op function that takes a blob but does nothing
     def noop(data: bytes) -> None:
+        """No-op function for measuring overhead."""
         pass
 
     return benchmark_function(noop, blob_pool, iterations)
@@ -105,9 +124,17 @@ def benchmark_sha256(blob_pool: List[bytes], iterations: int) -> list[float]:
     """
     Benchmark SHA256 hashing for a blob and return average time in nanoseconds.
     Takes multiple trials and returns the median for statistical robustness.
+
+    Args:
+        blob_pool: List of pre-generated blobs to cycle through
+        iterations: Number of iterations per trial
+
+    Returns:
+        List of timing measurements in nanoseconds
     """
 
     def sha256_digest(data: bytes) -> bytes:
+        """Compute SHA256 digest of input data."""
         return hashlib.sha256(data).digest()
 
     return benchmark_function(
@@ -119,12 +146,17 @@ def benchmark_sha256(blob_pool: List[bytes], iterations: int) -> list[float]:
 
 def generate_test_cases():
     """
-    Generate test cases as (blob_size, iterations, num_trials) tuples.
-    Yields blob sizes with appropriate iteration counts and trial counts.
-    - Small blobs: more iterations, more trials
-    - Large blobs: fewer iterations, fewer trials
-    """
+    Generate test cases as (blob_size, iterations) tuples.
+    Yields blob sizes with appropriate iteration counts.
 
+    Test cases are designed to:
+    - Small blobs: more iterations for statistical significance
+    - Large blobs: fewer iterations due to increased processing time
+    - Boundary cases: detailed testing around SHA block boundaries
+
+    Yields:
+        Tuple of (blob_size, iterations) for each test case
+    """
     for _ in range(10):
         iterations = 1000
 
@@ -133,19 +165,16 @@ def generate_test_cases():
             yield size, iterations
 
         # Around 55-56 boundary (55+9=64, 56+9=65) - detailed testing
-        for size in range(50, 70):
+        # Test wider range to check if 9-byte trailer spanning blocks affects performance
+        for size in range(45, 78):
             yield size, iterations
 
         # Other block boundaries: 64-9=55, 128-9=119, 192-9=183, etc.
+        # Test wider range around each boundary to check trailer spanning effect
         for blocks in range(2, 10):
             boundary = blocks * 64 - 9
-            for size in [
-                boundary - 2,
-                boundary - 1,
-                boundary,
-                boundary + 1,
-                boundary + 2,
-            ]:
+            # Test sizes where trailer might span blocks: boundary-5 to boundary+5
+            for size in range(boundary - 5, boundary + 14):
                 yield size, iterations
 
         # Medium to large - fewer iterations and trials
@@ -154,18 +183,21 @@ def generate_test_cases():
             yield size, iterations
 
         # Even larger blobs (100s of blocks) - minimal iterations and trials
+        # Test wider range around large boundaries to check trailer spanning effect
         for blocks in [50, 75, 100, 150, 200, 256, 512, 1024]:
             size = blocks * 64 - 9
             iterations = 10000 * 256 // size
-            yield size - 1, iterations
-            yield size, iterations
-            yield size + 1, iterations
+            # Test sizes where trailer might span blocks: size-5 to size+14
+            for offset in range(-5, 14):
+                yield size + offset, iterations
 
 
 def run_benchmark() -> dict[int, List[float]]:
     """
     Run benchmark across all test sizes and collect results.
-    Returns a dictionary with size as key and list of measurements as value.
+
+    Returns:
+        A dictionary with blob size as key and list of timing measurements as value
     """
     test_cases = list(generate_test_cases())
 
@@ -191,6 +223,13 @@ def run_benchmark() -> dict[int, List[float]]:
 def analyze_results(results_by_size: dict[int, List[float]]) -> None:
     """
     Analyze results and fit linear model to find optimal cost ratio.
+
+    This function performs linear regression on the benchmark results to determine
+    the optimal ratio between COST_PER_SHA_BLOCK and COST_PER_SHA_INVOCATION.
+
+    Args:
+        results_by_size: Dictionary with blob sizes as keys and lists of timing
+                        measurements as values
     """
     print("\n" + "=" * 80)
     print("ANALYSIS: Fitting linear model to wall-clock time")
@@ -290,11 +329,18 @@ def analyze_results(results_by_size: dict[int, List[float]]) -> None:
 def validate_sha_boundaries(results_by_size: dict[int, List[float]]) -> None:
     """
     Validate SHA block boundaries using existing benchmark results.
-    Checks: 55/56 (1→2), 119/120 (2→3), 183/184 (3→4) block transitions.
-    Formulas: size+9 must be multiple of 64.
-    - 55+9=64 → 1 block, 56+9=65 → 2 blocks
-    - 119+9=128 → 2 blocks, 120+9=129 → 3 blocks
-    - 183+9=192 → 3 blocks, 184+9=193 → 4 blocks
+
+    Checks key block transitions where the number of SHA blocks increases:
+    - 55/56 (1→2 blocks): 55+9=64 → 1 block, 56+9=65 → 2 blocks
+    - 119/120 (2→3 blocks): 119+9=128 → 2 blocks, 120+9=129 → 3 blocks
+    - 183/184 (3→4 blocks): 183+9=192 → 3 blocks, 184+9=193 → 4 blocks
+
+    The expected time increase between block transitions is calculated dynamically
+    from the benchmark data using a linear model, rather than using a hard-coded value.
+
+    Args:
+        results_by_size: Dictionary with blob sizes as keys and lists of timing
+                        measurements as values
     """
     print("\n" + "=" * 80)
     print("SHA BLOCK BOUNDARY VALIDATION")
@@ -327,7 +373,7 @@ def validate_sha_boundaries(results_by_size: dict[int, List[float]]) -> None:
 
         measurements = {}
         for size in available_sizes:
-            sha_blocks = sha_block_for_size(size)[0]
+            sha_blocks = sha_block_for_size(size)
             avg_time_ns = np.median(results_by_size[size])
             measurements[size] = (sha_blocks, avg_time_ns)
 
@@ -355,10 +401,41 @@ def validate_sha_boundaries(results_by_size: dict[int, List[float]]) -> None:
 
         # Check transition
         if len(block_keys) >= 2:
-            expected_diff = 27.90  # From fitted model
-            actual_diff = sum(block_groups[block_keys[1]]) / len(
-                block_groups[block_keys[1]]
-            ) - sum(block_groups[block_keys[0]]) / len(block_groups[block_keys[0]])
+            # Calculate expected time increase based on linear model
+            # Fit linear model to current boundary data
+            boundary_sizes = [
+                size
+                for size in available_sizes
+                if sha_block_for_size(size) in block_keys[:2]
+            ]
+            if len(boundary_sizes) >= 2:
+                boundary_blocks = [sha_block_for_size(size) for size in boundary_sizes]
+                boundary_times = [
+                    np.median(results_by_size[size]) for size in boundary_sizes
+                ]
+
+                # Simple linear fit for just these two points
+                # time = a * blocks + b
+                # For two points, we can calculate the slope directly
+                expected_diff = (boundary_times[1] - boundary_times[0]) / (
+                    boundary_blocks[1] - boundary_blocks[0]
+                )
+            else:
+                # Fallback to using the global model if we don't have enough data
+                # Extract data for linear regression
+                sizes = sorted(results_by_size.keys())
+                sha_blocks = np.array([sha_block_for_size(size) for size in sizes])
+                wall_times_ns = np.array(
+                    [np.median(results_by_size[size]) for size in sizes]
+                )
+
+                # Fit linear model: time = a * blocks + b
+                coeffs = np.polyfit(sha_blocks, wall_times_ns, 1)
+                expected_diff = coeffs[0]  # This is the slope (ns per block)
+
+            actual_diff = (
+                sum(block_groups[block_keys[1]]) / len(block_groups[block_keys[1]])
+            ) - (sum(block_groups[block_keys[0]]) / len(block_groups[block_keys[0]]))
             print(
                 f"\n  Expected time increase ({block_keys[0]}→{block_keys[1]} blocks): {expected_diff:.1f} ns"
             )
@@ -370,7 +447,12 @@ def validate_sha_boundaries(results_by_size: dict[int, List[float]]) -> None:
 def measure_overhead() -> Tuple[float, float, float]:
     """
     Measure Python driver overhead before and after benchmark.
-    Returns (median_overhead_before, median_overhead_after, median_overhead_average).
+
+    This function measures the overhead of the Python benchmarking framework itself,
+    which is then subtracted from the SHA256 measurements to get the true SHA cost.
+
+    Returns:
+        Tuple of (median_overhead_before, median_overhead_after, median_overhead_average)
     """
     # First, measure Python driver overhead (before main benchmark)
     print("=" * 80)
@@ -432,6 +514,10 @@ def measure_overhead() -> Tuple[float, float, float]:
 def print_results_table(results_by_size: dict[int, List[float]]) -> None:
     """
     Print the results table showing average time and efficiency for each size.
+
+    Args:
+        results_by_size: Dictionary with blob sizes as keys and lists of timing
+                        measurements as values
     """
     print("-" * 80)
     print(
@@ -455,9 +541,19 @@ def report_results(
 ) -> None:
     """
     Print analysis and final report of benchmark results.
+
+    This function performs the main analysis of the benchmark results, including:
+    - Linear regression to find cost constants
+    - Validation of SHA block boundaries
+    - Calculation of optimal cost ratios
+
+    Args:
+        results_by_size: Dictionary with blob sizes as keys and lists of timing
+                        measurements as values
+        median_overhead: Median Python driver overhead to subtract from measurements
     """
+    validate_sha_boundaries(results_by_size)
     analyze_results(results_by_size)
-    # validate_sha_boundaries(results_by_size)
 
     # Print final linear function summary
     print("\n" + "=" * 80)

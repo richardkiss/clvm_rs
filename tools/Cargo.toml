@@ -16,7 +16,7 @@ hex = { workspace = true }
 rand = { workspace = true }
 sha1 = { workspace = true }
 linreg = { workspace = true }
-clvmr = { workspace = true }
+clvmr = { workspace = true, features = ["ser-2026"] }
 chia-bls = { workspace = true }
 num-bigint = { workspace = true }
 num-integer = { workspace = true }
@@ -42,5 +42,15 @@ bench = false
 
 [[bin]]
 name = "generate-modpow-tests"
+test = false
+bench = false
+
+[[bin]]
+name = "clvm-serde"
+test = false
+bench = false
+
+[[bin]]
+name = "dos-test"
 test = false
 bench = false
