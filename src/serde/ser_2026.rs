@@ -123,7 +123,7 @@ pub fn serialize_2026(allocator: &Allocator, node: NodePtr) -> Result<Vec<u8>> {
         let len = interned_allocator.atom_len(atom_node);
         atoms_by_length
             .entry(len)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(atom_node);
     }
 
