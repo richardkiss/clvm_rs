@@ -5,17 +5,30 @@
 //! - Compute SHA256 tree hash
 //! - Extract cost components for fee calculation
 //!
-//! The cost components are exposed separately from any specific cost formula,
-//! allowing the formula to be tuned and tested for DoS resistance independently.
+//! ## Cost Formula (Post-Hardfork)
+//!
+//! The cost formula is designed to protect against both memory and CPU DoS attacks
+//! by splitting cost 50/50 between size-based and SHA256-based components:
+//!
+//! ```text
+//! size_component = B×atom_bytes + A×atom_count + P×pair_count
+//! sha_component  = S×sha_blocks + I×sha_invocations
+//!
+//! total_cost = size_component × SIZE_COST_PER_BYTE
+//!            + sha_component × SHA_COST_PER_UNIT
+//! ```
+//!
+//! Where:
+//! - B=1, A=2, P=2 (size coefficients)
+//! - S=1, I=8 (SHA coefficients, ratio from empirical benchmarking)
+//! - SIZE_COST_PER_BYTE = 6000 (half of old COST_PER_BYTE)
+//! - SHA_COST_PER_UNIT = 4500 (fitted to maintain backward compatibility)
 //!
 //! ## Note
 //!
 //! This module is Chia-specific and will migrate to `chia_rs`. It depends on:
 //! - `crate::serde::intern::intern_node` (core CLVM interning)
 //! - `crate::serde::object_cache` (tree hash caching)
-//!
-//! The cost formula itself (B×atom_bytes + A×atom_count + P×pair_count) is not
-//! implemented here - that belongs in `chia_rs` where consensus constants live.
 
 use crate::allocator::{Allocator, NodePtr, SExp};
 use crate::serde::bytes32::Bytes32;
@@ -88,16 +101,84 @@ impl CostComponents {
         self.atom_count + self.pair_count
     }
 
-    /// Compute estimated serialized length using the validated formula.
+    /// Compute the size component of the cost formula.
+    ///
+    /// Formula: `B×atom_bytes + A×atom_count + P×pair_count`
+    /// With B=1, A=2, P=2.
+    #[inline]
+    pub fn size_component(&self) -> u64 {
+        COEF_B * self.atom_bytes + COEF_A * self.atom_count + COEF_P * self.pair_count
+    }
+
+    /// Compute the SHA256 component of the cost formula.
+    ///
+    /// Formula: `S×sha_blocks + I×sha_invocations`
+    /// With S=1, I=8 (ratio from empirical benchmarking).
+    #[inline]
+    pub fn sha_component(&self) -> u64 {
+        COEF_S * self.sha_blocks() + COEF_I * self.sha_invocations()
+    }
+
+    /// Compute estimated serialized length using the old formula.
     ///
     /// Formula: `atom_bytes + 2×atom_count + 2×pair_count`
     ///
     /// This approximates what the backref-serialized size would be.
+    /// Kept for backward compatibility and comparison.
     #[inline]
     pub fn estimated_len(&self) -> u64 {
         self.atom_bytes + 2 * self.atom_count + 2 * self.pair_count
     }
+
+    /// Compute the total cost using the blended formula.
+    ///
+    /// This is the post-hardfork cost that protects against both
+    /// memory DoS (via size component) and CPU DoS (via SHA component).
+    ///
+    /// Formula:
+    /// ```text
+    /// total_cost = size_component × SIZE_COST_PER_BYTE
+    ///            + sha_component × SHA_COST_PER_UNIT
+    /// ```
+    #[inline]
+    pub fn total_cost(&self) -> u64 {
+        self.size_component() * SIZE_COST_PER_BYTE + self.sha_component() * SHA_COST_PER_UNIT
+    }
 }
+
+// =============================================================================
+// Cost Formula Constants
+// =============================================================================
+
+/// Size coefficient for atom bytes (B).
+/// Each byte of atom data contributes 1 unit to size component.
+pub const COEF_B: u64 = 1;
+
+/// Size coefficient for atom count (A).
+/// Per-atom overhead (length prefix, structural overhead).
+pub const COEF_A: u64 = 2;
+
+/// Size coefficient for pair count (P).
+/// Per-pair structural overhead.
+pub const COEF_P: u64 = 2;
+
+/// SHA coefficient for block count (S).
+/// Cost per SHA256 64-byte block processed.
+pub const COEF_S: u64 = 1;
+
+/// SHA coefficient for invocation count (I).
+/// Cost per SHA256 invocation (setup/finalize overhead).
+/// Ratio of ~8× vs block cost determined by empirical benchmarking.
+pub const COEF_I: u64 = 8;
+
+/// Cost multiplier for size component.
+/// This is half of the old COST_PER_BYTE (12000) to achieve 50% size / 50% SHA split.
+pub const SIZE_COST_PER_BYTE: u64 = 6000;
+
+/// Cost multiplier for SHA component.
+/// Fitted against real generators to maintain backward compatibility
+/// (total cost ≈ old cost for typical generators).
+pub const SHA_COST_PER_UNIT: u64 = 4500;
 
 /// Result of processing a generator.
 ///
@@ -173,6 +254,37 @@ pub fn cost_components(allocator: &Allocator, node: NodePtr) -> Result<CostCompo
     Ok(compute_cost_components(&interned_allocator, &atoms, &pairs))
 }
 
+/// Simplest API: compute generator cost and tree hash.
+///
+/// This is the primary function for post-hardfork validation. It:
+/// 1. Interns the generator tree
+/// 2. Computes the SHA256 tree hash (new identity)
+/// 3. Computes the blended cost (protection against DoS)
+///
+/// # Arguments
+/// * `allocator` - The allocator containing the deserialized generator
+/// * `node` - The root node of the generator
+///
+/// # Returns
+/// A tuple of `(total_cost, tree_hash)` where:
+/// - `total_cost` is the blended cost for fee calculation
+/// - `tree_hash` is the SHA256 tree hash (generator identity)
+///
+/// # Example
+///
+/// ```ignore
+/// let (cost, hash) = generator_cost_and_hash(&allocator, node)?;
+/// if cost > max_cost {
+///     return Err("generator cost exceeds block limit");
+/// }
+/// // Use hash as generator identity for caching, validation, etc.
+/// ```
+pub fn generator_cost_and_hash(allocator: &Allocator, node: NodePtr) -> Result<(u64, Bytes32)> {
+    let info = process_generator(allocator, node)?;
+    let cost = info.cost_components.total_cost();
+    Ok((cost, info.tree_hash))
+}
+
 /// Collect unique atoms and pairs from an interned tree.
 ///
 /// Since the tree is already interned, we just need to traverse it once
@@ -231,10 +343,9 @@ fn compute_cost_components(
 /// Compute SHA256 tree hash for a node.
 fn compute_tree_hash(allocator: &Allocator, node: NodePtr) -> Bytes32 {
     let mut cache: ObjectCache<Bytes32> = ObjectCache::new(treehash);
-    cache
+    *cache
         .get_or_calculate(allocator, &node, None)
         .expect("treehash should not fail")
-        .clone()
 }
 
 #[cfg(test)]

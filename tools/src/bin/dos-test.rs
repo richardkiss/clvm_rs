@@ -4,12 +4,22 @@
 //! to identify potential exploitation vectors.
 //!
 //! Usage:
-//!   cargo run --release -p clvm_tools --bin dos-test
-//!   cargo run --release -p clvm_tools --bin dos-test -- --help
+//!   cargo run --release -p clvm-rs-test-tools --bin dos-test
+//!   cargo run --release -p clvm-rs-test-tools --bin dos-test -- --help
 
 use clap::Parser;
 use clvmr::{cost_components, Allocator, CostComponents, NodePtr};
 use std::time::Instant;
+
+// Cost formula constants (matching generator.rs)
+const COEF_B: u64 = 1;
+const COEF_A: u64 = 2;
+const COEF_P: u64 = 2;
+const COEF_S: u64 = 1;
+const COEF_I: u64 = 8;
+const SIZE_COST_PER_BYTE: u64 = 6000;
+const SHA_COST_PER_UNIT: u64 = 4500;
+const OLD_COST_PER_BYTE: u64 = 12000;
 
 #[derive(Parser)]
 #[command(name = "dos-test")]
@@ -37,35 +47,29 @@ struct TestResult {
 }
 
 impl TestResult {
-    /// Simplified 3-term formula: atom_bytes + A×atom_count + P×pair_count
-    /// This is the proposed hard fork formula (no SHA terms needed due to caching)
-    fn cost_3term(&self, a: u64, p: u64) -> u64 {
+    /// Size component: B×atom_bytes + A×atom_count + P×pair_count
+    fn size_component(&self) -> u64 {
         let c = &self.components;
-        c.atom_bytes + a * c.atom_count + p * c.pair_count
+        COEF_B * c.atom_bytes + COEF_A * c.atom_count + COEF_P * c.pair_count
     }
 
-    /// Balanced formula with moderate constants
-    fn cost_balanced(&self) -> u64 {
-        // A=300, P=500
-        self.cost_3term(300, 500)
-    }
-
-    /// Scaled formula to match old COST_PER_BYTE=12000 magnitude
-    fn cost_scaled(&self) -> u64 {
-        // A=3000, P=5000
-        self.cost_3term(3000, 5000)
-    }
-
-    /// SHA256-only cost (for comparison/analysis)
-    fn cost_sha_only(&self) -> u64 {
+    /// SHA component: S×sha_blocks + I×sha_invocations
+    fn sha_component(&self) -> u64 {
         let c = &self.components;
-        10 * c.sha_invocations() + 3 * c.sha_blocks()
+        COEF_S * c.sha_blocks() + COEF_I * c.sha_invocations()
     }
 
-    /// Storage-only cost (for comparison/analysis)
-    fn cost_storage_only(&self) -> u64 {
+    /// New blended cost formula (50% size + 50% SHA)
+    fn cost_blended(&self) -> u64 {
+        self.size_component() * SIZE_COST_PER_BYTE + self.sha_component() * SHA_COST_PER_UNIT
+    }
+
+    /// Old cost formula (backref_size × 12000)
+    /// We approximate backref_size as estimated_len for comparison
+    fn cost_old_approx(&self) -> u64 {
         let c = &self.components;
-        c.atom_bytes + 2 * c.atom_count + 6 * c.pair_count
+        let estimated_len = c.atom_bytes + 2 * c.atom_count + 2 * c.pair_count;
+        estimated_len * OLD_COST_PER_BYTE
     }
 
     /// Ratio of actual work (intern time) to cost charged
@@ -74,6 +78,15 @@ impl TestResult {
             return f64::INFINITY;
         }
         self.intern_time_us as f64 / cost as f64
+    }
+
+    /// Ratio of new cost to old cost
+    fn cost_ratio(&self) -> f64 {
+        let old = self.cost_old_approx();
+        if old == 0 {
+            return f64::INFINITY;
+        }
+        self.cost_blended() as f64 / old as f64
     }
 }
 
@@ -133,7 +146,7 @@ fn main() {
         });
     }
 
-    // Print results
+    // Print component summary
     println!(
         "{:<25} {:>10} {:>10} {:>12} {:>10} {:>10}",
         "Test", "Atoms", "Pairs", "Bytes", "SHA Inv", "SHA Blk"
@@ -153,95 +166,145 @@ fn main() {
         );
     }
 
+    // Print cost comparison
     println!();
     println!(
-        "{:<25} {:>12} {:>12} {:>14} {:>14}",
-        "Test", "Balanced", "Scaled", "SHA-only", "Store-only"
+        "{:<25} {:>12} {:>12} {:>14} {:>14} {:>8}",
+        "Test", "Size Comp", "SHA Comp", "Blended Cost", "Old Cost", "Ratio"
     );
-    println!("{}", "-".repeat(75));
+    println!("{}", "-".repeat(95));
 
     for r in &results {
         println!(
-            "{:<25} {:>12} {:>12} {:>14} {:>14}",
+            "{:<25} {:>12} {:>12} {:>14} {:>14} {:>8.2}",
             r.name,
-            r.cost_balanced(),
-            r.cost_scaled(),
-            r.cost_sha_only(),
-            r.cost_storage_only()
+            r.size_component(),
+            r.sha_component(),
+            r.cost_blended(),
+            r.cost_old_approx(),
+            r.cost_ratio()
         );
     }
 
     // Print timing analysis
     println!();
     println!(
-        "{:<25} {:>10} {:>10} {:>14} {:>14}",
-        "Test", "Build μs", "Intern μs", "μs/Balanced", "μs/Scaled"
+        "{:<25} {:>10} {:>10} {:>16} {:>14}",
+        "Test", "Build μs", "Intern μs", "μs/Blended Cost", "ns/cost unit"
     );
-    println!("{}", "-".repeat(75));
+    println!("{}", "-".repeat(85));
 
     for r in &results {
+        let ns_per_cost = if r.cost_blended() > 0 {
+            (r.intern_time_us as f64 * 1000.0) / r.cost_blended() as f64
+        } else {
+            f64::INFINITY
+        };
         println!(
-            "{:<25} {:>10} {:>10} {:>14.6} {:>14.6}",
+            "{:<25} {:>10} {:>10} {:>16.9} {:>14.6}",
             r.name,
             r.build_time_us,
             r.intern_time_us,
-            r.work_per_cost(r.cost_balanced()),
-            r.work_per_cost(r.cost_scaled())
+            r.work_per_cost(r.cost_blended()),
+            ns_per_cost
         );
     }
 
     // Identify potential issues
     println!();
-    println!("=== Potential Issues ===");
+    println!("=== DoS Analysis (Blended Formula) ===");
+    println!();
+    println!(
+        "Formula: cost = size_comp × {} + sha_comp × {}",
+        SIZE_COST_PER_BYTE, SHA_COST_PER_UNIT
+    );
+    println!(
+        "Where:   size_comp = {}×bytes + {}×atoms + {}×pairs",
+        COEF_B, COEF_A, COEF_P
+    );
+    println!(
+        "         sha_comp  = {}×sha_blocks + {}×sha_invocations",
+        COEF_S, COEF_I
+    );
     println!();
 
-    // Find tests with highest work-per-cost ratio
-    let mut by_balanced: Vec<_> = results.iter().collect();
-    by_balanced.sort_by(|a, b| {
-        b.work_per_cost(b.cost_balanced())
-            .partial_cmp(&a.work_per_cost(a.cost_balanced()))
+    // Find tests with highest work-per-cost ratio (potential DoS vectors)
+    let mut by_work_ratio: Vec<_> = results.iter().collect();
+    by_work_ratio.sort_by(|a, b| {
+        b.work_per_cost(b.cost_blended())
+            .partial_cmp(&a.work_per_cost(a.cost_blended()))
             .unwrap()
     });
 
-    println!("Highest work/cost (balanced formula: bytes + 300×atoms + 500×pairs):");
-    for r in by_balanced.iter().take(3) {
+    println!("Highest work/cost ratio (potential DoS vectors):");
+    for r in by_work_ratio.iter().take(5) {
+        let ns_per_cost = (r.intern_time_us as f64 * 1000.0) / r.cost_blended() as f64;
         println!(
-            "  {}: {:.6} μs/cost (intern={}μs, cost={})",
+            "  {}: {:.6} μs/cost ({} μs intern, {} cost, {:.3} ns/cost)",
             r.name,
-            r.work_per_cost(r.cost_balanced()),
+            r.work_per_cost(r.cost_blended()),
             r.intern_time_us,
-            r.cost_balanced()
+            r.cost_blended(),
+            ns_per_cost
         );
     }
 
-    let mut by_scaled: Vec<_> = results.iter().collect();
-    by_scaled.sort_by(|a, b| {
-        b.work_per_cost(b.cost_scaled())
-            .partial_cmp(&a.work_per_cost(a.cost_scaled()))
-            .unwrap()
-    });
-
+    // Show cost ratio analysis (new vs old)
     println!();
-    println!("Highest work/cost (scaled formula: bytes + 3000×atoms + 5000×pairs):");
-    for r in by_scaled.iter().take(3) {
+    println!("=== New vs Old Cost Comparison ===");
+    println!();
+    println!("Ratio > 1.0 means new formula charges MORE (safer against DoS)");
+    println!("Ratio < 1.0 means new formula charges LESS (potential concern)");
+    println!();
+
+    let mut by_ratio: Vec<_> = results.iter().collect();
+    by_ratio.sort_by(|a, b| a.cost_ratio().partial_cmp(&b.cost_ratio()).unwrap());
+
+    for r in &by_ratio {
+        let indicator = if r.cost_ratio() >= 1.0 { "✓" } else { "⚠" };
         println!(
-            "  {}: {:.8} μs/cost (intern={}μs, cost={})",
+            "  {} {}: new/old = {:.2}x (blended={}, old={})",
+            indicator,
             r.name,
-            r.work_per_cost(r.cost_scaled()),
-            r.intern_time_us,
-            r.cost_scaled()
+            r.cost_ratio(),
+            r.cost_blended(),
+            r.cost_old_approx()
         );
     }
 
-    // Compare balanced vs scaled
+    // Check for concerning patterns
     println!();
-    println!("=== Balanced vs Scaled Ratio ===");
+    println!("=== Safety Assessment ===");
     println!();
 
-    for r in &results {
-        let ratio = r.cost_scaled() as f64 / r.cost_balanced() as f64;
-        println!("{}: scaled/balanced = {:.2}x", r.name, ratio);
+    let min_ratio = by_ratio.first().map(|r| r.cost_ratio()).unwrap_or(1.0);
+    let max_work_per_cost = by_work_ratio
+        .first()
+        .map(|r| r.work_per_cost(r.cost_blended()))
+        .unwrap_or(0.0);
+
+    if min_ratio < 0.5 {
+        println!("⚠ WARNING: Some structures cost <50% of old formula - review needed!");
+    } else if min_ratio < 1.0 {
+        println!(
+            "⚠ CAUTION: Some structures cost less than old formula (min ratio: {:.2}x)",
+            min_ratio
+        );
+    } else {
+        println!(
+            "✓ All adversarial structures cost >= old formula (min ratio: {:.2}x)",
+            min_ratio
+        );
     }
+
+    println!(
+        "  Max work/cost ratio: {:.6} μs/cost unit",
+        max_work_per_cost
+    );
+    println!(
+        "  This means ~{:.0} cost units per microsecond of work",
+        1.0 / max_work_per_cost
+    );
 
     if args.verbose {
         println!();
@@ -259,10 +322,11 @@ fn main() {
             println!("    build: {} μs", r.build_time_us);
             println!("    intern: {} μs", r.intern_time_us);
             println!("  Costs:");
-            println!("    balanced (300/500): {}", r.cost_balanced());
-            println!("    scaled (3000/5000): {}", r.cost_scaled());
-            println!("    sha_only: {}", r.cost_sha_only());
-            println!("    storage_only: {}", r.cost_storage_only());
+            println!("    size_component: {}", r.size_component());
+            println!("    sha_component: {}", r.sha_component());
+            println!("    blended_cost: {}", r.cost_blended());
+            println!("    old_cost_approx: {}", r.cost_old_approx());
+            println!("    new/old ratio: {:.2}x", r.cost_ratio());
         }
     }
 }

@@ -23,7 +23,10 @@ pub use chia_dialect::ChiaDialect;
 pub use run_program::run_program;
 
 // Chia-specific exports (will migrate to chia_rs)
-pub use chia::{cost_components, process_generator, CostComponents, GeneratorInfo};
+pub use chia::{
+    cost_components, generator_cost_and_hash, process_generator, CostComponents, GeneratorInfo,
+    COEF_A, COEF_B, COEF_I, COEF_P, COEF_S, SHA_COST_PER_UNIT, SIZE_COST_PER_BYTE,
+};
 
 pub use chia_dialect::{ENABLE_KECCAK_OPS_OUTSIDE_GUARD, LIMIT_HEAP, MEMPOOL_MODE, NO_UNKNOWN_OPS};
 

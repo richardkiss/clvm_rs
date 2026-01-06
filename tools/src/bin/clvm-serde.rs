@@ -64,21 +64,37 @@ struct Args {
     #[arg(long)]
     csv: Option<String>,
 
-    /// B coefficient for estimated_len (per atom byte)
+    /// B coefficient for size component (per atom byte)
     #[arg(long, default_value_t = 1)]
     coef_b: u64,
 
-    /// A coefficient for estimated_len (per atom)
+    /// A coefficient for size component (per atom)
     #[arg(long, default_value_t = 2)]
     coef_a: u64,
 
-    /// P coefficient for estimated_len (per pair)
-    #[arg(long, default_value_t = 5)]
+    /// P coefficient for size component (per pair)
+    #[arg(long, default_value_t = 2)]
     coef_p: u64,
 
-    /// COST_PER_BYTE multiplier
+    /// S coefficient for SHA component (per sha_block)
+    #[arg(long, default_value_t = 1)]
+    coef_s: u64,
+
+    /// I coefficient for SHA component (per sha_invocation)
+    #[arg(long, default_value_t = 8)]
+    coef_i: u64,
+
+    /// SIZE_COST_PER_BYTE multiplier for size component
+    #[arg(long, default_value_t = 6000)]
+    size_cost_per_byte: u64,
+
+    /// SHA_COST_PER_UNIT multiplier for SHA component
+    #[arg(long, default_value_t = 4500)]
+    sha_cost_per_unit: u64,
+
+    /// Old COST_PER_BYTE for comparison
     #[arg(long, default_value_t = 12000)]
-    cost_per_byte: u64,
+    old_cost_per_byte: u64,
 }
 
 fn deserialize(
@@ -208,20 +224,33 @@ struct AnalysisRecord {
     atom_count: u64,
     pair_count: u64,
     atom_bytes: u64,
-    estimated_len: u64,
+    sha_blocks: u64,
+    sha_invocations: u64,
+    size_component: u64,
+    sha_component: u64,
+    blended_cost: u64,
     old_cost: u64,
-    new_cost: u64,
     cost_ratio: f64,
+    size_pct: f64,
     tree_hash: String,
+}
+
+#[derive(Clone, Copy)]
+struct CostParams {
+    coef_b: u64,
+    coef_a: u64,
+    coef_p: u64,
+    coef_s: u64,
+    coef_i: u64,
+    size_cost_per_byte: u64,
+    sha_cost_per_unit: u64,
+    old_cost_per_byte: u64,
 }
 
 fn analyze_file(
     path: &Path,
     input_format: Option<Format>,
-    coef_b: u64,
-    coef_a: u64,
-    coef_p: u64,
-    cost_per_byte: u64,
+    params: CostParams,
 ) -> Result<AnalysisRecord, String> {
     let data = fs::read(path).map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
     let input_size = data.len();
@@ -247,13 +276,22 @@ fn analyze_file(
     // Compute interned stats
     let stats = compute_stats(&allocator, node)?;
 
-    // Calculate costs
-    let estimated_len =
-        coef_b * stats.atom_bytes + coef_a * stats.atom_count + coef_p * stats.pair_count;
-    let old_cost = backref_size as u64 * cost_per_byte;
-    let new_cost = estimated_len * cost_per_byte;
+    // Calculate blended cost
+    let size_component = params.coef_b * stats.atom_bytes
+        + params.coef_a * stats.atom_count
+        + params.coef_p * stats.pair_count;
+    let sha_component =
+        params.coef_s * stats.sha_blocks() + params.coef_i * stats.sha_invocations();
+    let blended_cost =
+        size_component * params.size_cost_per_byte + sha_component * params.sha_cost_per_unit;
+    let old_cost = backref_size as u64 * params.old_cost_per_byte;
     let cost_ratio = if old_cost > 0 {
-        new_cost as f64 / old_cost as f64
+        blended_cost as f64 / old_cost as f64
+    } else {
+        0.0
+    };
+    let size_pct = if blended_cost > 0 {
+        (size_component * params.size_cost_per_byte) as f64 / blended_cost as f64 * 100.0
     } else {
         0.0
     };
@@ -271,10 +309,14 @@ fn analyze_file(
         atom_count: stats.atom_count,
         pair_count: stats.pair_count,
         atom_bytes: stats.atom_bytes,
-        estimated_len,
+        sha_blocks: stats.sha_blocks(),
+        sha_invocations: stats.sha_invocations(),
+        size_component,
+        sha_component,
+        blended_cost,
         old_cost,
-        new_cost,
         cost_ratio,
+        size_pct,
         tree_hash,
     })
 }
@@ -308,7 +350,7 @@ fn write_csv(records: &[AnalysisRecord], path: &str) -> Result<(), String> {
     // Header
     writeln!(
         writer,
-        "filename,input_size,classic_size,backref_size,ser2026_size,atom_count,pair_count,atom_bytes,estimated_len,old_cost,new_cost,cost_ratio,tree_hash"
+        "filename,input_size,classic_size,backref_size,ser2026_size,atom_count,pair_count,atom_bytes,sha_blocks,sha_invocations,size_component,sha_component,blended_cost,old_cost,cost_ratio,size_pct,tree_hash"
     )
     .map_err(|e| format!("Failed to write CSV header: {}", e))?;
 
@@ -316,7 +358,7 @@ fn write_csv(records: &[AnalysisRecord], path: &str) -> Result<(), String> {
     for r in records {
         writeln!(
             writer,
-            "{},{},{},{},{},{},{},{},{},{},{},{:.4},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.4},{:.1},{}",
             r.filename,
             r.input_size,
             r.classic_size,
@@ -325,10 +367,14 @@ fn write_csv(records: &[AnalysisRecord], path: &str) -> Result<(), String> {
             r.atom_count,
             r.pair_count,
             r.atom_bytes,
-            r.estimated_len,
+            r.sha_blocks,
+            r.sha_invocations,
+            r.size_component,
+            r.sha_component,
+            r.blended_cost,
             r.old_cost,
-            r.new_cost,
             r.cost_ratio,
+            r.size_pct,
             r.tree_hash
         )
         .map_err(|e| format!("Failed to write CSV row: {}", e))?;
@@ -386,6 +432,17 @@ fn run_batch(args: &Args) -> Result<(), String> {
     let mut records = Vec::new();
     let mut errors = Vec::new();
 
+    let params = CostParams {
+        coef_b: args.coef_b,
+        coef_a: args.coef_a,
+        coef_p: args.coef_p,
+        coef_s: args.coef_s,
+        coef_i: args.coef_i,
+        size_cost_per_byte: args.size_cost_per_byte,
+        sha_cost_per_unit: args.sha_cost_per_unit,
+        old_cost_per_byte: args.old_cost_per_byte,
+    };
+
     for (i, path) in files.iter().enumerate() {
         eprint!(
             "\rProcessing {}/{}: {}",
@@ -394,14 +451,7 @@ fn run_batch(args: &Args) -> Result<(), String> {
             path.file_name().unwrap_or_default().to_string_lossy()
         );
 
-        match analyze_file(
-            path,
-            args.input_format,
-            args.coef_b,
-            args.coef_a,
-            args.coef_p,
-            args.cost_per_byte,
-        ) {
+        match analyze_file(path, args.input_format, params) {
             Ok(record) => records.push(record),
             Err(e) => errors.push((path.clone(), e)),
         }
@@ -420,9 +470,12 @@ fn run_batch(args: &Args) -> Result<(), String> {
     if !records.is_empty() {
         let total_input: usize = records.iter().map(|r| r.input_size).sum();
         let total_backref: usize = records.iter().map(|r| r.backref_size).sum();
-        let total_estimated: u64 = records.iter().map(|r| r.estimated_len).sum();
+        let total_blended: u64 = records.iter().map(|r| r.blended_cost).sum();
+        let total_old: u64 = records.iter().map(|r| r.old_cost).sum();
         let avg_ratio: f64 =
             records.iter().map(|r| r.cost_ratio).sum::<f64>() / records.len() as f64;
+        let avg_size_pct: f64 =
+            records.iter().map(|r| r.size_pct).sum::<f64>() / records.len() as f64;
         let min_ratio = records
             .iter()
             .map(|r| r.cost_ratio)
@@ -435,15 +488,25 @@ fn run_batch(args: &Args) -> Result<(), String> {
             .unwrap_or(0.0);
 
         println!(
-            "\nSummary (B={}, A={}, P={}):",
-            args.coef_b, args.coef_a, args.coef_p
+            "\nBlended Cost Summary (B={}, A={}, P={}, S={}, I={}):",
+            args.coef_b, args.coef_a, args.coef_p, args.coef_s, args.coef_i
         );
-        println!("  Total input size:    {} bytes", total_input);
-        println!("  Total backref size:  {} bytes", total_backref);
-        println!("  Total estimated_len: {} bytes", total_estimated);
+        println!(
+            "  SIZE_COST_PER_BYTE={}, SHA_COST_PER_UNIT={}",
+            args.size_cost_per_byte, args.sha_cost_per_unit
+        );
+        println!("  Total input size:   {} bytes", total_input);
+        println!("  Total backref size: {} bytes", total_backref);
+        println!("  Total blended cost: {}", total_blended);
+        println!("  Total old cost:     {}", total_old);
         println!(
             "  Cost ratio (new/old): min={:.4}, avg={:.4}, max={:.4}",
             min_ratio, avg_ratio, max_ratio
+        );
+        println!(
+            "  Avg size/sha split: {:.1}% / {:.1}%",
+            avg_size_pct,
+            100.0 - avg_size_pct
         );
 
         // Find outliers
@@ -455,8 +518,8 @@ fn run_batch(args: &Args) -> Result<(), String> {
             println!("\nOutliers (ratio < 0.5 or > 2.0):");
             for r in outliers.iter().take(10) {
                 println!(
-                    "  {} ratio={:.4} (backref={}, estimated={})",
-                    r.filename, r.cost_ratio, r.backref_size, r.estimated_len
+                    "  {} ratio={:.4} (blended={}, old={})",
+                    r.filename, r.cost_ratio, r.blended_cost, r.old_cost
                 );
             }
             if outliers.len() > 10 {
@@ -543,43 +606,78 @@ fn main() -> Result<(), String> {
             stats.sha_invocations()
         );
 
-        // Two-stage cost calculation
-        let estimated_len = args.coef_b * stats.atom_bytes
+        // Blended cost calculation (50% size + 50% SHA)
+        let size_component = args.coef_b * stats.atom_bytes
             + args.coef_a * stats.atom_count
             + args.coef_p * stats.pair_count;
+        let sha_component =
+            args.coef_s * stats.sha_blocks() + args.coef_i * stats.sha_invocations();
+        let blended_cost =
+            size_component * args.size_cost_per_byte + sha_component * args.sha_cost_per_unit;
+
         let backref_size = serialize(&allocator, node, Format::Backref)
             .map(|b| b.len())
             .unwrap_or(0) as u64;
-        let old_cost = backref_size * args.cost_per_byte;
-        let new_cost = estimated_len * args.cost_per_byte;
+        let old_cost = backref_size * args.old_cost_per_byte;
+
         let ratio = if old_cost > 0 {
-            new_cost as f64 / old_cost as f64
+            blended_cost as f64 / old_cost as f64
+        } else {
+            0.0
+        };
+
+        let size_pct = if blended_cost > 0 {
+            (size_component * args.size_cost_per_byte) as f64 / blended_cost as f64 * 100.0
         } else {
             0.0
         };
 
         println!(
-            "\nCost Comparison (B={}, A={}, P={}):",
-            args.coef_b, args.coef_a, args.coef_p
+            "\nBlended Cost Formula (B={}, A={}, P={}, S={}, I={}):",
+            args.coef_b, args.coef_a, args.coef_p, args.coef_s, args.coef_i
         );
         println!(
-            "  estimated_len = {}*{} + {}*{} + {}*{} = {}",
+            "  size_component = {}×{} + {}×{} + {}×{} = {}",
             args.coef_b,
             stats.atom_bytes,
             args.coef_a,
             stats.atom_count,
             args.coef_p,
             stats.pair_count,
-            estimated_len
-        );
-        println!("  backref_size  = {}", backref_size);
-        println!(
-            "  old_cost      = {} × {} = {}",
-            backref_size, args.cost_per_byte, old_cost
+            size_component
         );
         println!(
-            "  new_cost      = {} × {} = {}",
-            estimated_len, args.cost_per_byte, new_cost
+            "  sha_component  = {}×{} + {}×{} = {}",
+            args.coef_s,
+            stats.sha_blocks(),
+            args.coef_i,
+            stats.sha_invocations(),
+            sha_component
+        );
+        println!("  ---");
+        println!(
+            "  size_cost  = {} × {} = {}",
+            size_component,
+            args.size_cost_per_byte,
+            size_component * args.size_cost_per_byte
+        );
+        println!(
+            "  sha_cost   = {} × {} = {}",
+            sha_component,
+            args.sha_cost_per_unit,
+            sha_component * args.sha_cost_per_unit
+        );
+        println!(
+            "  blended    = {} ({:.1}% size, {:.1}% sha)",
+            blended_cost,
+            size_pct,
+            100.0 - size_pct
+        );
+        println!("  ---");
+        println!("  backref_size = {}", backref_size);
+        println!(
+            "  old_cost     = {} × {} = {}",
+            backref_size, args.old_cost_per_byte, old_cost
         );
         println!("  ratio (new/old) = {:.4}", ratio);
     }
