@@ -32,6 +32,7 @@
 mod generator;
 
 pub use generator::{
-    cost_components, generator_cost_and_hash, process_generator, CostComponents, GeneratorInfo,
-    COEF_A, COEF_B, COEF_I, COEF_P, COEF_S, SHA_COST_PER_UNIT, SIZE_COST_PER_BYTE,
+    cost_and_tree_hash_for_bytes, cost_components, generator_cost_and_hash, process_generator,
+    CostComponents, GeneratorInfo, COEF_A, COEF_B, COEF_I, COEF_P, COEF_S, SHA_COST_PER_UNIT,
+    SIZE_COST_PER_BYTE,
 };

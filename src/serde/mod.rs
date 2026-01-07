@@ -1,12 +1,11 @@
 mod bitset;
 pub(crate) mod bytes32;
-mod cost;
 mod de;
 mod de_br;
 mod de_tree;
 mod identity_hash;
 mod incremental;
-pub(crate) mod intern;
+pub mod intern;
 pub(crate) mod object_cache;
 mod parse_atom;
 mod path_builder;
@@ -32,13 +31,16 @@ mod test_ser_2026;
 
 pub use bitset::BitSet;
 pub use bytes32::Bytes32;
-pub use cost::{cost_and_tree_hash_for_bytes, tree_hash_cost};
 pub use de::node_from_bytes;
 pub use de_br::{node_from_bytes_backrefs, node_from_bytes_backrefs_old};
 pub use de_tree::{parse_triples, ParsedTriple};
 pub use identity_hash::RandomState;
 pub use incremental::{Serializer, UndoState};
-pub use intern::{create_interned_node, intern_node, stats_for_interned_nodes, InternedStats};
+// New API
+pub use intern::{intern, InternedStats, InternedTree};
+// Deprecated - kept for backward compatibility
+#[allow(deprecated)]
+pub use intern::{create_interned_node, intern_node, stats_for_interned_nodes};
 pub use object_cache::{serialized_length, treehash, ObjectCache};
 pub use path_builder::{ChildPos, PathBuilder};
 pub use read_cache_lookup::ReadCacheLookup;

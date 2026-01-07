@@ -4,65 +4,8 @@ use std::io::{Cursor, Read, Write};
 use crate::allocator::{Allocator, NodePtr, SExp};
 use crate::error::{EvalErr, Result};
 
-use super::intern::intern_node;
+use super::intern::intern;
 use super::varint::{decode_varint, encode_varint};
-
-/// Collected unique atoms and pairs from an interned allocator.
-/// Stores NodePtrs rather than copying data - use the allocator to access content.
-struct InternedNodes {
-    atoms: Vec<NodePtr>,
-    pairs: Vec<NodePtr>,
-}
-
-/// Extract unique atoms and pairs from an interned allocator via post-order traversal.
-/// Returns (nodes, root_index, node_to_index_map) where indices are:
-/// - atoms: 0, 1, 2, ... (non-negative)
-/// - pairs: -1, -2, -3, ... (negative)
-fn collect_interned_nodes(
-    allocator: &Allocator,
-    root: NodePtr,
-) -> (InternedNodes, i32, HashMap<NodePtr, i32>) {
-    let mut nodes = InternedNodes {
-        atoms: Vec::new(),
-        pairs: Vec::new(),
-    };
-    let mut node_to_index: HashMap<NodePtr, i32> = HashMap::new();
-    let mut stack: Vec<NodePtr> = vec![root];
-
-    while let Some(&current) = stack.last() {
-        if node_to_index.contains_key(&current) {
-            stack.pop();
-            continue;
-        }
-
-        match allocator.sexp(current) {
-            SExp::Atom => {
-                stack.pop();
-                let idx = nodes.atoms.len() as i32;
-                nodes.atoms.push(current);
-                node_to_index.insert(current, idx);
-            }
-            SExp::Pair(left, right) => {
-                if node_to_index.contains_key(&left) && node_to_index.contains_key(&right) {
-                    stack.pop();
-                    nodes.pairs.push(current);
-                    let idx = -(nodes.pairs.len() as i32);
-                    node_to_index.insert(current, idx);
-                } else {
-                    if !node_to_index.contains_key(&right) {
-                        stack.push(right);
-                    }
-                    if !node_to_index.contains_key(&left) {
-                        stack.push(left);
-                    }
-                }
-            }
-        }
-    }
-
-    let root_index = node_to_index[&root];
-    (nodes, root_index, node_to_index)
-}
 
 /// Serialize a node using the 2026 serialization format.
 ///
@@ -71,19 +14,29 @@ fn collect_interned_nodes(
 /// 2. Renumbers atoms and pairs for optimal compression
 /// 3. Serializes using the 2026 format with varints
 pub fn serialize_2026(allocator: &Allocator, node: NodePtr) -> Result<Vec<u8>> {
-    // Step 1: Intern the node (O(n) where n = unique nodes)
-    let (interned_allocator, interned_root) = intern_node(allocator, node)?;
+    // Step 1: Intern the node (single pass)
+    let tree = intern(allocator, node)?;
 
-    // Step 2: Collect unique atoms and pairs from the interned allocator
-    let (nodes, root_index, node_to_index) =
-        collect_interned_nodes(&interned_allocator, interned_root);
+    // Step 2: Build node-to-index mappings
+    // Atoms: 0, 1, 2, ... (non-negative)
+    // Pairs: -1, -2, -3, ... (negative, 1-based)
+    let (atom_to_index, pair_to_index) = tree.node_indices();
 
-    let atom_count = nodes.atoms.len();
-    let pair_count = nodes.pairs.len();
+    let atom_count = tree.atoms.len();
+    let pair_count = tree.pairs.len();
 
-    // Step 3: Sort atoms by length (shorter atoms get lower indices)
+    // Combined node-to-index for lookups
+    let node_to_index = |n: NodePtr| -> i32 {
+        if let Some(&idx) = atom_to_index.get(&n) {
+            idx
+        } else {
+            pair_to_index[&n]
+        }
+    };
+
+    // Step 3: Sort atoms by length (shorter atoms get lower indices for better varint compression)
     let mut sorted_atom_indices: Vec<usize> = (0..atom_count).collect();
-    sorted_atom_indices.sort_by_key(|&i| interned_allocator.atom_len(nodes.atoms[i]));
+    sorted_atom_indices.sort_by_key(|&i| tree.allocator.atom_len(tree.atoms[i]));
 
     // Create remap for atoms (maps old index -> new index)
     let mut atom_remap: HashMap<i32, i32> = HashMap::new();
@@ -92,16 +45,16 @@ pub fn serialize_2026(allocator: &Allocator, node: NodePtr) -> Result<Vec<u8>> {
     }
 
     // Step 4: Build remapped pair children (atom indices remapped, pair indices unchanged)
-    let remapped_pairs: Vec<(i32, i32)> = nodes
+    let remapped_pairs: Vec<(i32, i32)> = tree
         .pairs
         .iter()
         .map(|&pair_node| {
-            let (left, right) = match interned_allocator.sexp(pair_node) {
+            let (left, right) = match tree.allocator.sexp(pair_node) {
                 SExp::Pair(l, r) => (l, r),
                 _ => unreachable!(),
             };
-            let left_idx = node_to_index[&left];
-            let right_idx = node_to_index[&right];
+            let left_idx = node_to_index(left);
+            let right_idx = node_to_index(right);
             let new_left = if left_idx >= 0 {
                 atom_remap[&left_idx]
             } else {
@@ -119,12 +72,9 @@ pub fn serialize_2026(allocator: &Allocator, node: NodePtr) -> Result<Vec<u8>> {
     // Step 5: Group atoms by length
     let mut atoms_by_length: HashMap<usize, Vec<NodePtr>> = HashMap::new();
     for &old_idx in &sorted_atom_indices {
-        let atom_node = nodes.atoms[old_idx];
-        let len = interned_allocator.atom_len(atom_node);
-        atoms_by_length
-            .entry(len)
-            .or_default()
-            .push(atom_node);
+        let atom_node = tree.atoms[old_idx];
+        let len = tree.allocator.atom_len(atom_node);
+        atoms_by_length.entry(len).or_default().push(atom_node);
     }
 
     // Step 6: Serialize
@@ -144,18 +94,20 @@ pub fn serialize_2026(allocator: &Allocator, node: NodePtr) -> Result<Vec<u8>> {
         if count == 1 {
             // Single atom: write positive length, then bytes
             output.write_all(&encode_varint(length as i64))?;
-            output.write_all(interned_allocator.atom(atoms_of_length[0]).as_ref())?;
+            output.write_all(tree.allocator.atom(atoms_of_length[0]).as_ref())?;
         } else {
             // Multiple atoms: write negative length, then count, then all bytes
             output.write_all(&encode_varint(-(length as i64)))?;
             output.write_all(&encode_varint(count as i64))?;
             for &atom_node in atoms_of_length {
-                output.write_all(interned_allocator.atom(atom_node).as_ref())?;
+                output.write_all(tree.allocator.atom(atom_node).as_ref())?;
             }
         }
     }
 
     // Step 7: Generate instruction stream
+    let root_index = node_to_index(tree.root);
+
     if pair_count == 0 {
         // No pairs, root is an atom - just push it
         let remapped_root_idx = atom_remap[&root_index];
@@ -258,8 +210,7 @@ pub fn deserialize_2026(allocator: &mut Allocator, data: &[u8]) -> Result<NodePt
         };
     }
 
-    // Pre-allocate vectors - pairs will have at most instruction_count entries
-    // (one per cons instruction), stack depth is typically much smaller
+    // Pre-allocate vectors
     let mut pairs: Vec<NodePtr> = Vec::with_capacity(instruction_count / 2);
     let mut stack: Vec<NodePtr> = Vec::with_capacity(64);
 

@@ -1,23 +1,21 @@
 use crate::allocator::{Allocator, NodePtr};
 use crate::error::Result;
 use crate::serde::bytes32::Bytes32;
-use crate::serde::create_interned_node;
+use crate::serde::intern::intern;
 use crate::serde::node_from_bytes_backrefs;
 use crate::serde::node_to_bytes;
 use crate::serde::object_cache::{treehash, ObjectCache};
 
 fn treehash_for_node(allocator: &Allocator, node: NodePtr) -> Bytes32 {
     let mut object_cache = ObjectCache::new(treehash);
-    let stop_token = None;
     *object_cache
-        .get_or_calculate(allocator, &node, stop_token)
+        .get_or_calculate(allocator, &node, None)
         .unwrap()
 }
 
 /// Helper to convert hex string to bytes
-/// Supports whitespace and newlines which are stripped
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
-    let hex_clean = hex.trim().replace(" ", "").replace("\n", "");
+    let hex_clean = hex.trim().replace(' ', "").replace('\n', "");
     hex_clean
         .chars()
         .collect::<Vec<_>>()
@@ -42,57 +40,39 @@ fn test_hex_interning(hex: &str, expected_atoms: usize, expected_pairs: usize) -
     // Deserialize from hex
     let node = hex_to_node(&mut allocator, hex)?;
 
-    // Create interned version and capture visit counts
-    let (new_allocator, interned_node, counts) = create_interned_node(&allocator, node)?;
+    // Create interned version using the new API
+    let tree = intern(&allocator, node)?;
 
-    // ensure interned node serializes to same bytes
+    // Ensure interned node serializes to same bytes
     let original_serialized = node_to_bytes(&allocator, node)?;
-    let new_serialized = node_to_bytes(&new_allocator, interned_node)?;
+    let new_serialized = node_to_bytes(&tree.allocator, tree.root)?;
     assert_eq!(
         original_serialized, new_serialized,
         "Serialized bytes do not match after interning."
     );
 
-    // ensure treehashes match
+    // Ensure treehashes match
     let original_treehash = treehash_for_node(&allocator, node);
-    let new_treehash = treehash_for_node(&new_allocator, interned_node);
+    let new_treehash = tree.tree_hash();
     assert_eq!(
         original_treehash, new_treehash,
         "Treehashes do not match after interning."
     );
 
-    // Calculate unique atom and pair counts from visit counts
-    let mut intern_atom_count = 0;
-    let mut total_atom_count = 0;
-    let mut intern_pair_count = 0;
-    let mut total_pair_count = 0;
-    for (node, count) in counts {
-        if !node.is_pair() {
-            intern_atom_count += 1;
-            total_atom_count += count;
-        } else {
-            intern_pair_count += 1;
-            total_pair_count += count;
-        }
-    }
-
-    // Verify unique intern stats
+    // Verify unique atom and pair counts
     assert_eq!(
-        intern_atom_count, expected_atoms,
-        "Intern atom count doesn't match expected.\nGot:      {:?}\nExpected: {:?}",
-        intern_atom_count, expected_atoms
+        tree.atoms.len(),
+        expected_atoms,
+        "Atom count doesn't match expected.\nGot:      {:?}\nExpected: {:?}",
+        tree.atoms.len(),
+        expected_atoms
     );
     assert_eq!(
-        intern_pair_count, expected_pairs,
-        "Intern pair count doesn't match expected.\nGot:      {:?}\nExpected: {:?}",
-        intern_pair_count, expected_pairs
-    );
-
-    // Verify visit count invariant: total_atoms == total_pairs + 1
-    assert_eq!(
-        total_atom_count,
-        total_pair_count + 1,
-        "Visit count invariant failed: total_atoms should equal total_pairs + 1"
+        tree.pairs.len(),
+        expected_pairs,
+        "Pair count doesn't match expected.\nGot:      {:?}\nExpected: {:?}",
+        tree.pairs.len(),
+        expected_pairs
     );
 
     Ok(())
