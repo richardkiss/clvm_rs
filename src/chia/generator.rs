@@ -88,8 +88,6 @@ pub struct CostComponents {
     pub atom_bytes: u64,
     /// SHA256 blocks needed for atoms: Σ(⌈(atom_len + 10) / 64⌉)
     pub sha_atom_blocks: u64,
-    /// SHA256 blocks needed for pairs: 2 × pair_count
-    pub sha_pair_blocks: u64,
 }
 
 impl From<InternedStats> for CostComponents {
@@ -99,16 +97,21 @@ impl From<InternedStats> for CostComponents {
             pair_count: stats.pair_count,
             atom_bytes: stats.atom_bytes,
             sha_atom_blocks: stats.sha_atom_blocks,
-            sha_pair_blocks: stats.sha_pair_blocks,
         }
     }
 }
 
 impl CostComponents {
+    /// SHA256 blocks for pairs: always 2 per pair
+    #[inline]
+    pub fn sha_pair_blocks(&self) -> u64 {
+        2 * self.pair_count
+    }
+
     /// Total SHA256 blocks (atom blocks + pair blocks)
     #[inline]
     pub fn sha_blocks(&self) -> u64 {
-        self.sha_atom_blocks + self.sha_pair_blocks
+        self.sha_atom_blocks + self.sha_pair_blocks()
     }
 
     /// Total SHA256 invocations (one per unique node)
@@ -137,16 +140,6 @@ impl CostComponents {
     #[inline]
     pub fn sha_component(&self) -> u64 {
         COEF_S * self.sha_blocks() + COEF_I * self.sha_invocations()
-    }
-
-    /// Compute estimated serialized length using the old formula.
-    ///
-    /// Formula: `atom_bytes + 2×atom_count + 2×pair_count`
-    ///
-    /// This approximates what the backref-serialized size would be.
-    #[inline]
-    pub fn estimated_len(&self) -> u64 {
-        self.atom_bytes + 2 * self.atom_count + 2 * self.pair_count
     }
 
     /// Compute the total cost using the blended formula.
@@ -282,7 +275,7 @@ mod tests {
         assert_eq!(info.cost_components.atom_count, 2);
         assert_eq!(info.cost_components.pair_count, 1);
         assert_eq!(info.cost_components.atom_bytes, 6);
-        assert_eq!(info.cost_components.sha_pair_blocks, 2);
+        assert_eq!(info.cost_components.sha_pair_blocks(), 2);
         assert_eq!(info.cost_components.sha_invocations(), 3);
     }
 
@@ -354,21 +347,5 @@ mod tests {
         assert_eq!(info.cost_components.atom_count, 2);
         assert_eq!(info.cost_components.pair_count, 1);
         assert_eq!(info.cost_components.atom_bytes, 10);
-    }
-
-    #[test]
-    fn test_estimated_len() {
-        let mut allocator = Allocator::new();
-        let a = allocator.new_atom(&[1, 2, 3, 4, 5]).unwrap();
-        let b = allocator.new_atom(&[6, 7, 8, 9, 10]).unwrap();
-        let p1 = allocator.new_pair(a, b).unwrap();
-        let p2 = allocator.new_pair(p1, a).unwrap();
-        let p3 = allocator.new_pair(p2, b).unwrap();
-
-        let components = cost_components(&allocator, p3).unwrap();
-
-        // estimated_len = atom_bytes + 2*atom_count + 2*pair_count
-        //               = 10 + 2*2 + 2*3 = 20
-        assert_eq!(components.estimated_len(), 20);
     }
 }

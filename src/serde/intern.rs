@@ -28,10 +28,6 @@ pub struct InternedStats {
     /// SHA256 blocks for atoms: Σ(⌈(atom_len + 10) / 64⌉)
     /// The +10 accounts for: 0x01 prefix (1 byte) + SHA256 padding overhead (9 bytes)
     pub sha_atom_blocks: u64,
-    /// SHA256 blocks for pairs: 2 × pair_count
-    /// Each pair hashes: 0x02 (1) + left_hash (32) + right_hash (32) = 65 bytes
-    /// With padding: 74 bytes → always 2 SHA256 blocks
-    pub sha_pair_blocks: u64,
 }
 
 impl InternedStats {
@@ -41,10 +37,18 @@ impl InternedStats {
         self.atom_count + self.pair_count
     }
 
+    /// SHA256 blocks for pairs: always 2 per pair.
+    /// Each pair hashes: 0x02 (1) + left_hash (32) + right_hash (32) = 65 bytes
+    /// With padding: 74 bytes → always 2 SHA256 blocks
+    #[inline]
+    pub fn sha_pair_blocks(&self) -> u64 {
+        2 * self.pair_count
+    }
+
     /// Total SHA256 blocks needed for tree hashing (atom blocks + pair blocks)
     #[inline]
     pub fn sha_blocks(&self) -> u64 {
-        self.sha_atom_blocks + self.sha_pair_blocks
+        self.sha_atom_blocks + self.sha_pair_blocks()
     }
 
     /// Total SHA256 invocations needed (one per unique node)
@@ -80,7 +84,6 @@ impl InternedTree {
             pair_count: self.pairs.len() as u64,
             atom_bytes: 0,
             sha_atom_blocks: 0,
-            sha_pair_blocks: 2 * self.pairs.len() as u64, // pairs always need 2 blocks
         };
 
         for &atom in &self.atoms {
@@ -279,7 +282,6 @@ pub fn stats_for_interned_nodes(
         pair_count: pairs.len() as u64,
         atom_bytes: 0,
         sha_atom_blocks: 0,
-        sha_pair_blocks: 2 * pairs.len() as u64,
     };
 
     for &atom in atoms {
@@ -366,7 +368,7 @@ mod tests {
         assert_eq!(stats.atom_count, 2);
         assert_eq!(stats.pair_count, 1);
         assert_eq!(stats.atom_bytes, 8);
-        assert_eq!(stats.sha_pair_blocks, 2);
+        assert_eq!(stats.sha_pair_blocks(), 2);
     }
 
     #[test]

@@ -8,6 +8,7 @@
 //!   cargo run --release -p clvm-rs-test-tools --bin dos-test -- --help
 
 use clap::Parser;
+use clvmr::serde::node_to_bytes_backrefs;
 use clvmr::{cost_components, Allocator, CostComponents, NodePtr};
 use std::time::Instant;
 
@@ -42,6 +43,7 @@ struct Args {
 struct TestResult {
     name: String,
     components: CostComponents,
+    backref_size: u64,
     build_time_us: u64,
     intern_time_us: u64,
 }
@@ -65,11 +67,8 @@ impl TestResult {
     }
 
     /// Old cost formula (backref_size × 12000)
-    /// We approximate backref_size as estimated_len for comparison
-    fn cost_old_approx(&self) -> u64 {
-        let c = &self.components;
-        let estimated_len = c.atom_bytes + 2 * c.atom_count + 2 * c.pair_count;
-        estimated_len * OLD_COST_PER_BYTE
+    fn cost_old(&self) -> u64 {
+        self.backref_size * OLD_COST_PER_BYTE
     }
 
     /// Ratio of actual work (intern time) to cost charged
@@ -82,7 +81,7 @@ impl TestResult {
 
     /// Ratio of new cost to old cost
     fn cost_ratio(&self) -> f64 {
-        let old = self.cost_old_approx();
+        let old = self.cost_old();
         if old == 0 {
             return f64::INFINITY;
         }
@@ -138,9 +137,19 @@ fn main() {
         };
         let intern_time_us = start.elapsed().as_micros() as u64;
 
+        // Compute actual backref-serialized size
+        let backref_size = match node_to_bytes_backrefs(&allocator, node) {
+            Ok(bytes) => bytes.len() as u64,
+            Err(e) => {
+                println!("{}: ERROR serializing - {:?}", name, e);
+                continue;
+            }
+        };
+
         results.push(TestResult {
             name: name.to_string(),
             components,
+            backref_size,
             build_time_us,
             intern_time_us,
         });
@@ -148,19 +157,20 @@ fn main() {
 
     // Print component summary
     println!(
-        "{:<25} {:>10} {:>10} {:>12} {:>10} {:>10}",
-        "Test", "Atoms", "Pairs", "Bytes", "SHA Inv", "SHA Blk"
+        "{:<25} {:>10} {:>10} {:>12} {:>12} {:>10} {:>10}",
+        "Test", "Atoms", "Pairs", "AtomBytes", "BackrefSize", "SHA Inv", "SHA Blk"
     );
-    println!("{}", "-".repeat(85));
+    println!("{}", "-".repeat(97));
 
     for r in &results {
         let c = &r.components;
         println!(
-            "{:<25} {:>10} {:>10} {:>12} {:>10} {:>10}",
+            "{:<25} {:>10} {:>10} {:>12} {:>12} {:>10} {:>10}",
             r.name,
             c.atom_count,
             c.pair_count,
             c.atom_bytes,
+            r.backref_size,
             c.sha_invocations(),
             c.sha_blocks()
         );
@@ -181,7 +191,7 @@ fn main() {
             r.size_component(),
             r.sha_component(),
             r.cost_blended(),
-            r.cost_old_approx(),
+            r.cost_old(),
             r.cost_ratio()
         );
     }
@@ -268,7 +278,7 @@ fn main() {
             r.name,
             r.cost_ratio(),
             r.cost_blended(),
-            r.cost_old_approx()
+            r.cost_old()
         );
     }
 
@@ -316,8 +326,9 @@ fn main() {
             println!("    atom_count: {}", r.components.atom_count);
             println!("    pair_count: {}", r.components.pair_count);
             println!("    atom_bytes: {}", r.components.atom_bytes);
+            println!("    backref_size: {}", r.backref_size);
             println!("    sha_atom_blocks: {}", r.components.sha_atom_blocks);
-            println!("    sha_pair_blocks: {}", r.components.sha_pair_blocks);
+            println!("    sha_pair_blocks: {}", r.components.sha_pair_blocks());
             println!("  Timing:");
             println!("    build: {} μs", r.build_time_us);
             println!("    intern: {} μs", r.intern_time_us);
@@ -325,7 +336,7 @@ fn main() {
             println!("    size_component: {}", r.size_component());
             println!("    sha_component: {}", r.sha_component());
             println!("    blended_cost: {}", r.cost_blended());
-            println!("    old_cost_approx: {}", r.cost_old_approx());
+            println!("    old_cost: {}", r.cost_old());
             println!("    new/old ratio: {:.2}x", r.cost_ratio());
         }
     }

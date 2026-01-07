@@ -1,11 +1,9 @@
 use clap::{Parser, ValueEnum};
 use clvmr::allocator::Allocator;
 use clvmr::serde::{
-    deserialize_2026, intern_node, node_from_bytes, node_from_bytes_backrefs, node_to_bytes,
-    node_to_bytes_backrefs, serialize_2026, stats_for_interned_nodes, treehash, InternedStats,
-    ObjectCache,
+    deserialize_2026, intern, node_from_bytes, node_from_bytes_backrefs, node_to_bytes,
+    node_to_bytes_backrefs, serialize_2026, treehash, InternedStats, ObjectCache,
 };
-use std::collections::HashMap;
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -143,66 +141,12 @@ fn compute_tree_hash(allocator: &Allocator, node: clvmr::allocator::NodePtr) -> 
     *cache.get_or_calculate(allocator, &node, None).unwrap()
 }
 
-/// Collect unique atoms and pairs from an interned allocator via post-order traversal.
-fn collect_nodes(
-    allocator: &Allocator,
-    root: clvmr::allocator::NodePtr,
-) -> (
-    Vec<clvmr::allocator::NodePtr>,
-    Vec<clvmr::allocator::NodePtr>,
-) {
-    use clvmr::allocator::SExp;
-
-    let mut atoms = Vec::new();
-    let mut pairs = Vec::new();
-    let mut visited: HashMap<clvmr::allocator::NodePtr, ()> = HashMap::new();
-    let mut stack = vec![root];
-
-    while let Some(&current) = stack.last() {
-        if visited.contains_key(&current) {
-            stack.pop();
-            continue;
-        }
-
-        match allocator.sexp(current) {
-            SExp::Atom => {
-                stack.pop();
-                atoms.push(current);
-                visited.insert(current, ());
-            }
-            SExp::Pair(left, right) => {
-                if visited.contains_key(&left) && visited.contains_key(&right) {
-                    stack.pop();
-                    pairs.push(current);
-                    visited.insert(current, ());
-                } else {
-                    if !visited.contains_key(&right) {
-                        stack.push(right);
-                    }
-                    if !visited.contains_key(&left) {
-                        stack.push(left);
-                    }
-                }
-            }
-        }
-    }
-
-    (atoms, pairs)
-}
-
 fn compute_stats(
     allocator: &Allocator,
     node: clvmr::allocator::NodePtr,
 ) -> Result<InternedStats, String> {
-    let (interned_allocator, interned_root) =
-        intern_node(allocator, node).map_err(|e| format!("Failed to intern: {:?}", e))?;
-
-    let (atoms, pairs) = collect_nodes(&interned_allocator, interned_root);
-    Ok(stats_for_interned_nodes(
-        &interned_allocator,
-        &atoms,
-        &pairs,
-    ))
+    let tree = intern(allocator, node).map_err(|e| format!("Failed to intern: {:?}", e))?;
+    Ok(tree.stats())
 }
 
 fn format_name(format: Format) -> &'static str {
@@ -597,7 +541,7 @@ fn main() -> Result<(), String> {
         );
         println!(
             "  sha_pair_blocks: {} (for pair hashing)",
-            stats.sha_pair_blocks
+            stats.sha_pair_blocks()
         );
         println!("  ---");
         println!("  sha_blocks:      {} (total)", stats.sha_blocks());
