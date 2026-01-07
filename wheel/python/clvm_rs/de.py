@@ -82,7 +82,7 @@ def deserialize_as_tuples(
         atom_offset, new_cursor = _atom_size_from_cursor(blob, cursor)
         my_hash = None
         if calculate_tree_hash:
-            my_hash = shatree_atom(blob[cursor + atom_offset : new_cursor])
+            my_hash = shatree_atom(blob[cursor + atom_offset:new_cursor])
             tree_hash_list.append(my_hash)
         obj_list.append((cursor, new_cursor, atom_offset))
         return new_cursor
@@ -111,7 +111,7 @@ def _atom_size_from_cursor(blob, cursor) -> Tuple[int, int]:
         bit_mask >>= 1
     size_blob = bytes([b])
     if bit_count > 1:
-        size_blob += blob[cursor + 1 : cursor + bit_count]
+        size_blob += blob[cursor + 1:cursor + bit_count]
     size = int.from_bytes(size_blob, "big")
     new_cursor = cursor + size + bit_count
     if new_cursor > len(blob):

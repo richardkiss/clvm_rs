@@ -84,7 +84,7 @@ class CLVMTree(CLVMStorage):
         if self.blob[start] == 0xFF:
             self.atom = None
         else:
-            self.atom = bytes(self.blob[start + atom_offset : end])
+            self.atom = bytes(self.blob[start + atom_offset:end])
             self._pair = None
 
     @property

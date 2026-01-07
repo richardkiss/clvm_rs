@@ -4,9 +4,10 @@ from clvm_rs.clvm_rs import run_serialized_chia_program
 
 
 def run_clvm(fn, env=None):
-    program = bytes.fromhex(open(fn, "r").read())
+
+    program = bytes.fromhex(open(fn, 'r').read())
     if env is not None:
-        env = bytes.fromhex(open(env, "r").read())
+        env = bytes.fromhex(open(env, 'r').read())
     else:
         env = bytes.fromhex("ff80")
     # constants from the main chia blockchain:
@@ -38,7 +39,6 @@ def count_tree_size(tree) -> int:
             assert False
     return ret
 
-
 if __name__ == "__main__":
     import sys
     from time import time
@@ -46,7 +46,7 @@ if __name__ == "__main__":
     try:
         start = time()
         cost, result = run_clvm(sys.argv[1], sys.argv[2])
-        duration = time() - start
+        duration = time() - start;
         print(f"cost: {cost}")
         print(f"execution time: {duration:.2f}s")
     except Exception as e:
@@ -54,7 +54,7 @@ if __name__ == "__main__":
         sys.exit(1)
     start = time()
     ret_size = count_tree_size(result)
-    duration = time() - start
+    duration = time() - start;
     print(f"returned bytes: {ret_size}")
     print(f"parse return value time: {duration:.2f}s")
     sys.exit(0)

@@ -88,8 +88,8 @@ class TestProgram(TestCase):
         assert hash(p1) == id(p1)
 
     def test_long_repr(self):
-        p1 = Program.fromhex(f"c062{'61' * 98}")
-        assert repr(p1) == f"Program(c062{'61' * 33}...616161)"
+        p1 = Program.fromhex(f"c062{'61'*98}")
+        assert repr(p1) == f"Program(c062{'61'*33}...616161)"
 
 
 def check_idempotency(p, *args):
@@ -493,7 +493,6 @@ class ProgramTest(TestCase):
         self.assertEqual(p3p._cached_sha256_treehash.hex(), eh3)
         self.assertEqual(p._cached_sha256_treehash.hex(), eh)
         self.assertEqual(p2._cached_sha256_treehash.hex(), eh2)
-
 
 def test_repr() -> None:
     temp = Program.to([8, (1, "foo")])

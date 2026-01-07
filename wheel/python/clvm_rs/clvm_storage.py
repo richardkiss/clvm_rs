@@ -12,7 +12,8 @@ class CLVMStorage(Protocol):
     atom: Optional[bytes]
 
     @property
-    def pair(self) -> Optional[Tuple["CLVMStorage", "CLVMStorage"]]: ...
+    def pair(self) -> Optional[Tuple["CLVMStorage", "CLVMStorage"]]:
+        ...
 
     # optional fields used to speed implementations:
 
