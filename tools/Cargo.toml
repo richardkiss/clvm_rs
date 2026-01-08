@@ -24,6 +24,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 rand_chacha = { workspace = true }
+chia-sha2.workspace = true
 
 [[bin]]
 name = "generate-fuzz-corpus"

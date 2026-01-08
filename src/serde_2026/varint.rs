@@ -1,3 +1,5 @@
+//! Variable-length integer encoding for the 2026 serialization format.
+
 use std::io::{Cursor, Read};
 
 use crate::error::{EvalErr, Result};

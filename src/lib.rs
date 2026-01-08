@@ -16,6 +16,8 @@ pub mod run_program;
 pub mod runtime_dialect;
 pub mod secp_ops;
 pub mod serde;
+#[cfg(feature = "ser-2026")]
+pub mod serde_2026;
 pub mod traverse_path;
 
 pub use allocator::{Allocator, Atom, NodePtr, ObjectType, SExp};
@@ -24,9 +26,9 @@ pub use run_program::run_program;
 
 // Chia-specific exports (will migrate to chia_rs)
 pub use chia::{
-    cost_and_tree_hash_for_bytes, cost_components, generator_cost_and_hash, process_generator,
-    CostComponents, GeneratorInfo, COEF_A, COEF_B, COEF_I, COEF_P, COEF_S, SHA_COST_PER_UNIT,
-    SIZE_COST_PER_BYTE,
+    cost_and_tree_hash_for_bytes, generator_cost_and_hash, intern_stats, process_generator,
+    sha_cost, size_cost, total_cost, GeneratorInfo, COEF_A, COEF_B, COEF_I, COEF_P, COEF_S,
+    SHA_COST_PER_UNIT, SIZE_COST_PER_BYTE,
 };
 
 pub use chia_dialect::{ENABLE_KECCAK_OPS_OUTSIDE_GUARD, LIMIT_HEAP, MEMPOOL_MODE, NO_UNKNOWN_OPS};

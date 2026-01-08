@@ -7,10 +7,10 @@
 //! ## Contents
 //!
 //! - `generator`: Process CLVM generators for consensus validation
-//!   - `CostComponents`: Raw metrics for cost formula calculation
-//!   - `GeneratorInfo`: Bundle of interned tree, hash, and cost data
+//!   - `GeneratorInfo`: Bundle of interned tree, hash, and stats
 //!   - `process_generator`: Main entry point for generator validation
 //!   - `generator_cost_and_hash`: Simplest API - returns (cost, hash)
+//!   - Cost functions: `size_cost`, `sha_cost`, `total_cost`
 //!
 //! ## Cost Formula
 //!
@@ -32,7 +32,7 @@
 mod generator;
 
 pub use generator::{
-    cost_and_tree_hash_for_bytes, cost_components, generator_cost_and_hash, process_generator,
-    CostComponents, GeneratorInfo, COEF_A, COEF_B, COEF_I, COEF_P, COEF_S, SHA_COST_PER_UNIT,
-    SIZE_COST_PER_BYTE,
+    cost_and_tree_hash_for_bytes, generator_cost_and_hash, intern_stats, process_generator,
+    sha_cost, size_cost, total_cost, GeneratorInfo, COEF_A, COEF_B, COEF_I, COEF_P, COEF_S,
+    SHA_COST_PER_UNIT, SIZE_COST_PER_BYTE,
 };

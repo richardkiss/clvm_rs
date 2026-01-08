@@ -3,7 +3,7 @@
 //! This module provides the main entry point for processing CLVM generators:
 //! - Intern the tree (deduplicate atoms and pairs)
 //! - Compute SHA256 tree hash
-//! - Extract cost components for fee calculation
+//! - Extract statistics for cost calculation
 //!
 //! ## Cost Formula (Post-Hardfork)
 //!
@@ -71,88 +71,35 @@ pub const SIZE_COST_PER_BYTE: u64 = 6000;
 pub const SHA_COST_PER_UNIT: u64 = 4500;
 
 // =============================================================================
-// CostComponents - Chia-specific wrapper around InternedStats
+// Chia-specific Cost Calculation Functions
 // =============================================================================
 
-/// Chia-specific cost components for generator validation.
+/// Compute the size component of the cost formula.
 ///
-/// This wraps the generic `InternedStats` and adds Chia-specific cost
-/// calculation methods using the consensus cost formula.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CostComponents {
-    /// Number of unique atoms in the interned tree
-    pub atom_count: u64,
-    /// Number of unique pairs in the interned tree
-    pub pair_count: u64,
-    /// Sum of all unique atom byte lengths: Σ(atom_len)
-    pub atom_bytes: u64,
-    /// SHA256 blocks needed for atoms: Σ(⌈(atom_len + 10) / 64⌉)
-    pub sha_atom_blocks: u64,
+/// Formula: `B×atom_bytes + A×atom_count + P×pair_count`
+#[inline]
+pub fn size_cost(stats: &InternedStats) -> u64 {
+    COEF_B * stats.atom_bytes + COEF_A * stats.atom_count + COEF_P * stats.pair_count
 }
 
-impl From<InternedStats> for CostComponents {
-    fn from(stats: InternedStats) -> Self {
-        Self {
-            atom_count: stats.atom_count,
-            pair_count: stats.pair_count,
-            atom_bytes: stats.atom_bytes,
-            sha_atom_blocks: stats.sha_atom_blocks,
-        }
-    }
+/// Compute the SHA256 component of the cost formula.
+///
+/// Formula: `S×sha_blocks + I×sha_invocations`
+#[inline]
+pub fn sha_cost(stats: &InternedStats) -> u64 {
+    COEF_S * stats.sha_blocks() + COEF_I * stats.sha_invocations()
 }
 
-impl CostComponents {
-    /// SHA256 blocks for pairs: always 2 per pair
-    #[inline]
-    pub fn sha_pair_blocks(&self) -> u64 {
-        2 * self.pair_count
-    }
-
-    /// Total SHA256 blocks (atom blocks + pair blocks)
-    #[inline]
-    pub fn sha_blocks(&self) -> u64 {
-        self.sha_atom_blocks + self.sha_pair_blocks()
-    }
-
-    /// Total SHA256 invocations (one per unique node)
-    #[inline]
-    pub fn sha_invocations(&self) -> u64 {
-        self.atom_count + self.pair_count
-    }
-
-    /// Total unique nodes (atoms + pairs)
-    #[inline]
-    pub fn node_count(&self) -> u64 {
-        self.atom_count + self.pair_count
-    }
-
-    /// Compute the size component of the cost formula.
-    ///
-    /// Formula: `B×atom_bytes + A×atom_count + P×pair_count`
-    #[inline]
-    pub fn size_component(&self) -> u64 {
-        COEF_B * self.atom_bytes + COEF_A * self.atom_count + COEF_P * self.pair_count
-    }
-
-    /// Compute the SHA256 component of the cost formula.
-    ///
-    /// Formula: `S×sha_blocks + I×sha_invocations`
-    #[inline]
-    pub fn sha_component(&self) -> u64 {
-        COEF_S * self.sha_blocks() + COEF_I * self.sha_invocations()
-    }
-
-    /// Compute the total cost using the blended formula.
-    ///
-    /// Formula:
-    /// ```text
-    /// total_cost = size_component × SIZE_COST_PER_BYTE
-    ///            + sha_component × SHA_COST_PER_UNIT
-    /// ```
-    #[inline]
-    pub fn total_cost(&self) -> u64 {
-        self.size_component() * SIZE_COST_PER_BYTE + self.sha_component() * SHA_COST_PER_UNIT
-    }
+/// Compute the total cost using the blended formula.
+///
+/// Formula:
+/// ```text
+/// total_cost = size_cost × SIZE_COST_PER_BYTE
+///            + sha_cost × SHA_COST_PER_UNIT
+/// ```
+#[inline]
+pub fn total_cost(stats: &InternedStats) -> u64 {
+    size_cost(stats) * SIZE_COST_PER_BYTE + sha_cost(stats) * SHA_COST_PER_UNIT
 }
 
 // =============================================================================
@@ -164,57 +111,57 @@ impl CostComponents {
 /// Contains everything needed for validation and cost calculation:
 /// - The interned tree (canonical representation)
 /// - The SHA256 tree hash (identity)
-/// - Cost components (for fee calculation)
+/// - Statistics for fee calculation
 #[derive(Debug)]
 pub struct GeneratorInfo {
     /// The interned tree containing only unique nodes
     pub tree: InternedTree,
     /// SHA256 tree hash of the generator
     pub tree_hash: Bytes32,
-    /// Cost components for fee calculation
-    pub cost_components: CostComponents,
+    /// Statistics for cost calculation
+    pub stats: InternedStats,
 }
 
 impl GeneratorInfo {
     /// Compute the total cost for this generator.
     #[inline]
     pub fn total_cost(&self) -> u64 {
-        self.cost_components.total_cost()
+        total_cost(&self.stats)
     }
 }
 
-/// Process a generator: intern, hash, and extract cost components.
+/// Process a generator: intern, hash, and extract statistics.
 ///
 /// This is the main entry point for generator validation. It:
 /// 1. Interns the tree (single pass - deduplicates atoms and pairs)
 /// 2. Computes the SHA256 tree hash
-/// 3. Extracts cost components
+/// 3. Extracts statistics for cost calculation
 ///
 /// # Arguments
 /// * `allocator` - The source allocator containing the deserialized generator
 /// * `node` - The root node of the generator
 ///
 /// # Returns
-/// A `GeneratorInfo` containing the interned tree, hash, and cost components.
+/// A `GeneratorInfo` containing the interned tree, hash, and statistics.
 pub fn process_generator(allocator: &Allocator, node: NodePtr) -> Result<GeneratorInfo> {
     let tree = intern(allocator, node)?;
-    let cost_components = CostComponents::from(tree.stats());
+    let stats = tree.stats();
     let tree_hash = tree.tree_hash();
 
     Ok(GeneratorInfo {
         tree,
         tree_hash,
-        cost_components,
+        stats,
     })
 }
 
-/// Get just the cost components (for DoS testing).
+/// Get just the interned statistics (for cost calculation without tree hash).
 ///
 /// This is a lighter-weight version of `process_generator` that skips
 /// computing the tree hash.
-pub fn cost_components(allocator: &Allocator, node: NodePtr) -> Result<CostComponents> {
+pub fn intern_stats(allocator: &Allocator, node: NodePtr) -> Result<InternedStats> {
     let tree = intern(allocator, node)?;
-    Ok(CostComponents::from(tree.stats()))
+    Ok(tree.stats())
 }
 
 /// Simplest API: compute generator cost and tree hash.
@@ -256,11 +203,11 @@ mod tests {
 
         let info = process_generator(&allocator, node).unwrap();
 
-        assert_eq!(info.cost_components.atom_count, 1);
-        assert_eq!(info.cost_components.pair_count, 0);
-        assert_eq!(info.cost_components.atom_bytes, 0);
-        assert_eq!(info.cost_components.sha_atom_blocks, 1);
-        assert_eq!(info.cost_components.sha_invocations(), 1);
+        assert_eq!(info.stats.atom_count, 1);
+        assert_eq!(info.stats.pair_count, 0);
+        assert_eq!(info.stats.atom_bytes, 0);
+        assert_eq!(info.stats.sha_atom_blocks, 1);
+        assert_eq!(info.stats.sha_invocations(), 1);
     }
 
     #[test]
@@ -272,11 +219,11 @@ mod tests {
 
         let info = process_generator(&allocator, node).unwrap();
 
-        assert_eq!(info.cost_components.atom_count, 2);
-        assert_eq!(info.cost_components.pair_count, 1);
-        assert_eq!(info.cost_components.atom_bytes, 6);
-        assert_eq!(info.cost_components.sha_pair_blocks(), 2);
-        assert_eq!(info.cost_components.sha_invocations(), 3);
+        assert_eq!(info.stats.atom_count, 2);
+        assert_eq!(info.stats.pair_count, 1);
+        assert_eq!(info.stats.atom_bytes, 6);
+        assert_eq!(info.stats.sha_pair_blocks(), 2);
+        assert_eq!(info.stats.sha_invocations(), 3);
     }
 
     #[test]
@@ -287,22 +234,22 @@ mod tests {
 
         let info = process_generator(&allocator, node).unwrap();
 
-        assert_eq!(info.cost_components.atom_count, 1);
-        assert_eq!(info.cost_components.pair_count, 1);
-        assert_eq!(info.cost_components.atom_bytes, 1);
+        assert_eq!(info.stats.atom_count, 1);
+        assert_eq!(info.stats.pair_count, 1);
+        assert_eq!(info.stats.atom_bytes, 1);
     }
 
     #[test]
-    fn test_cost_components_only() {
+    fn test_intern_stats_only() {
         let mut allocator = Allocator::new();
         let atom = allocator.new_atom(&[1, 2, 3, 4, 5]).unwrap();
         let node = allocator.new_pair(atom, allocator.nil()).unwrap();
 
-        let components = cost_components(&allocator, node).unwrap();
+        let stats = intern_stats(&allocator, node).unwrap();
 
-        assert_eq!(components.atom_count, 2);
-        assert_eq!(components.pair_count, 1);
-        assert_eq!(components.atom_bytes, 5);
+        assert_eq!(stats.atom_count, 2);
+        assert_eq!(stats.pair_count, 1);
+        assert_eq!(stats.atom_bytes, 5);
     }
 
     #[test]
@@ -310,11 +257,11 @@ mod tests {
         let mut allocator = Allocator::new();
         let atom = allocator.new_atom(&[0u8; 100]).unwrap();
 
-        let components = cost_components(&allocator, atom).unwrap();
+        let stats = intern_stats(&allocator, atom).unwrap();
 
-        assert_eq!(components.atom_count, 1);
-        assert_eq!(components.atom_bytes, 100);
-        assert_eq!(components.sha_atom_blocks, 2);
+        assert_eq!(stats.atom_count, 1);
+        assert_eq!(stats.atom_bytes, 100);
+        assert_eq!(stats.sha_atom_blocks, 2);
     }
 
     #[test]
@@ -333,7 +280,7 @@ mod tests {
         let info2 = process_generator(&alloc2, node2).unwrap();
 
         assert_eq!(info1.tree_hash, info2.tree_hash);
-        assert_eq!(info1.cost_components, info2.cost_components);
+        assert_eq!(info1.stats, info2.stats);
     }
 
     #[test]
@@ -344,8 +291,8 @@ mod tests {
 
         let info = process_generator(&allocator, node).unwrap();
 
-        assert_eq!(info.cost_components.atom_count, 2);
-        assert_eq!(info.cost_components.pair_count, 1);
-        assert_eq!(info.cost_components.atom_bytes, 10);
+        assert_eq!(info.stats.atom_count, 2);
+        assert_eq!(info.stats.pair_count, 1);
+        assert_eq!(info.stats.atom_bytes, 10);
     }
 }

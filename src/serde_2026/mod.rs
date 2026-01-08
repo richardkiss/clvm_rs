@@ -1,11 +1,36 @@
+//! 2026 Serialization Format for CLVM.
+//!
+//! This module implements a new serialization format designed for efficiency:
+//! - Deduplicates atoms and pairs via interning
+//! - Uses variable-length integer encoding (varints)
+//! - Groups atoms by length for better compression
+//! - Uses stack-based instruction stream for tree reconstruction
+//!
+//! ## Format Overview
+//!
+//! The serialized format consists of:
+//! 1. Atom table: grouped by length, with varint-encoded counts
+//! 2. Instruction stream: stack-based operations to reconstruct the tree
+//!
+//! ## Instructions
+//!
+//! - Positive varint N: Push atom at index N-1
+//! - Zero: Pop two items, cons them, push result
+//! - Negative varint -N: Push already-constructed pair at index N-1
+
+mod varint;
+
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
 
 use crate::allocator::{Allocator, NodePtr, SExp};
 use crate::error::{EvalErr, Result};
+use crate::serde::intern::intern;
 
-use super::intern::intern;
-use super::varint::{decode_varint, encode_varint};
+use varint::{decode_varint, encode_varint};
 
 /// Serialize a node using the 2026 serialization format.
 ///
@@ -245,46 +270,4 @@ pub fn deserialize_2026(allocator: &mut Allocator, data: &[u8]) -> Result<NodePt
     }
 
     Ok(stack[0])
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_roundtrip_simple_atom() {
-        let mut allocator = Allocator::new();
-        let node = allocator.new_atom(b"hello").unwrap();
-
-        let serialized = serialize_2026(&allocator, node).unwrap();
-        let mut new_allocator = Allocator::new();
-        let deserialized = deserialize_2026(&mut new_allocator, &serialized).unwrap();
-
-        let original_atom = allocator.atom(node);
-        let deserialized_atom = new_allocator.atom(deserialized);
-        assert_eq!(original_atom.as_ref(), deserialized_atom.as_ref());
-    }
-
-    #[test]
-    fn test_roundtrip_simple_pair() {
-        let mut allocator = Allocator::new();
-        let left = allocator.new_atom(b"left").unwrap();
-        let right = allocator.new_atom(b"right").unwrap();
-        let pair = allocator.new_pair(left, right).unwrap();
-
-        let serialized = serialize_2026(&allocator, pair).unwrap();
-        let mut new_allocator = Allocator::new();
-        let deserialized = deserialize_2026(&mut new_allocator, &serialized).unwrap();
-
-        // Check structure
-        match new_allocator.sexp(deserialized) {
-            SExp::Pair(l, r) => {
-                let left_atom = new_allocator.atom(l);
-                let right_atom = new_allocator.atom(r);
-                assert_eq!(left_atom.as_ref(), b"left");
-                assert_eq!(right_atom.as_ref(), b"right");
-            }
-            _ => panic!("Expected pair"),
-        }
-    }
 }

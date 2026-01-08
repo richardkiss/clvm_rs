@@ -8,8 +8,8 @@
 //!   cargo run --release -p clvm-rs-test-tools --bin dos-test -- --help
 
 use clap::Parser;
-use clvmr::serde::node_to_bytes_backrefs;
-use clvmr::{cost_components, Allocator, CostComponents, NodePtr};
+use clvmr::serde::{node_to_bytes_backrefs, InternedStats};
+use clvmr::{intern_stats, Allocator, NodePtr};
 use std::time::Instant;
 
 // Cost formula constants (matching generator.rs)
@@ -42,7 +42,7 @@ struct Args {
 /// Result of running a single adversarial test
 struct TestResult {
     name: String,
-    components: CostComponents,
+    stats: InternedStats,
     backref_size: u64,
     build_time_us: u64,
     intern_time_us: u64,
@@ -51,14 +51,14 @@ struct TestResult {
 impl TestResult {
     /// Size component: B×atom_bytes + A×atom_count + P×pair_count
     fn size_component(&self) -> u64 {
-        let c = &self.components;
-        COEF_B * c.atom_bytes + COEF_A * c.atom_count + COEF_P * c.pair_count
+        let s = &self.stats;
+        COEF_B * s.atom_bytes + COEF_A * s.atom_count + COEF_P * s.pair_count
     }
 
     /// SHA component: S×sha_blocks + I×sha_invocations
     fn sha_component(&self) -> u64 {
-        let c = &self.components;
-        COEF_S * c.sha_blocks() + COEF_I * c.sha_invocations()
+        let s = &self.stats;
+        COEF_S * s.sha_blocks() + COEF_I * s.sha_invocations()
     }
 
     /// New blended cost formula (50% size + 50% SHA)
@@ -127,10 +127,10 @@ fn main() {
         let node = builder(&mut allocator, args.scale);
         let build_time_us = start.elapsed().as_micros() as u64;
 
-        // Compute cost components (this does interning internally)
+        // Compute stats (this does interning internally)
         let start = Instant::now();
-        let components = match cost_components(&allocator, node) {
-            Ok(c) => c,
+        let stats = match intern_stats(&allocator, node) {
+            Ok(s) => s,
             Err(e) => {
                 println!("{}: ERROR - {:?}", name, e);
                 continue;
@@ -149,7 +149,7 @@ fn main() {
 
         results.push(TestResult {
             name: name.to_string(),
-            components,
+            stats,
             backref_size,
             build_time_us,
             intern_time_us,
@@ -164,16 +164,16 @@ fn main() {
     println!("{}", "-".repeat(97));
 
     for r in &results {
-        let c = &r.components;
+        let s = &r.stats;
         println!(
             "{:<25} {:>10} {:>10} {:>12} {:>12} {:>10} {:>10}",
             r.name,
-            c.atom_count,
-            c.pair_count,
-            c.atom_bytes,
+            s.atom_count,
+            s.pair_count,
+            s.atom_bytes,
             r.backref_size,
-            c.sha_invocations(),
-            c.sha_blocks()
+            s.sha_invocations(),
+            s.sha_blocks()
         );
     }
 
@@ -323,13 +323,13 @@ fn main() {
         for r in &results {
             println!();
             println!("{}:", r.name);
-            println!("  Components:");
-            println!("    atom_count: {}", r.components.atom_count);
-            println!("    pair_count: {}", r.components.pair_count);
-            println!("    atom_bytes: {}", r.components.atom_bytes);
+            println!("  Stats:");
+            println!("    atom_count: {}", r.stats.atom_count);
+            println!("    pair_count: {}", r.stats.pair_count);
+            println!("    atom_bytes: {}", r.stats.atom_bytes);
             println!("    backref_size: {}", r.backref_size);
-            println!("    sha_atom_blocks: {}", r.components.sha_atom_blocks);
-            println!("    sha_pair_blocks: {}", r.components.sha_pair_blocks());
+            println!("    sha_atom_blocks: {}", r.stats.sha_atom_blocks);
+            println!("    sha_pair_blocks: {}", r.stats.sha_pair_blocks());
             println!("  Timing:");
             println!("    build: {} μs", r.build_time_us);
             println!("    intern: {} μs", r.intern_time_us);

@@ -1,3 +1,6 @@
+// pyo3 macros generate code with redundant Into::into() calls on PyErr
+#![allow(clippy::useless_conversion)]
+
 use clvmr::allocator::{Allocator, NodePtr, SExp};
 use clvmr::serde::serialize_2026;
 use std::rc::Rc;
