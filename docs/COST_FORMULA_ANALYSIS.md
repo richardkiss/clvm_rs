@@ -30,7 +30,7 @@ This creates several problems:
 
 1. **Format lock-in**: Any change to serialization format changes the generator's identity, breaking consensus compatibility.
 
-2. **Compression penalties**: Better compression → smaller bytes → different hash. A more efficient representation of the *same logical tree* would have a different identity.
+2. **Compression penalties**: Better compression → smaller bytes → different hash. A more efficient representation of the _same logical tree_ would have a different identity.
 
 3. **Cost inconsistency**: The same logical tree serialized differently would have different costs, even though the actual work to process it is identical.
 
@@ -46,6 +46,7 @@ cost = f(interned_tree_structure)       // Structure-based
 **Key insight**: Two generators with the same tree hash contain the same logical content. They should have the same identity and cost, regardless of how they were serialized.
 
 This means:
+
 - Classic serialization (no compression)
 - Backref serialization (some sharing)
 - 2026 serialization (full interning)
@@ -62,11 +63,12 @@ This means:
 With serialization-coupled consensus, any compression improvement requires a hard fork because it changes generator hashes.
 
 With content-addressable identity, we can:
+
 - Improve compression algorithms without consensus changes
 - Add new serialization formats transparently
 - Optimize wire protocol independently of validation
 
-The generator's identity is its *content*, not its *encoding*.
+The generator's identity is its _content_, not its _encoding_.
 
 ### The Interning Requirement
 
@@ -77,6 +79,7 @@ Any serialization → deserialize → intern → canonical tree → deterministi
 ```
 
 Interning deduplicates the tree, producing a canonical representation where:
+
 - Identical atoms share the same node
 - Identical subtrees share the same node
 
@@ -89,6 +92,7 @@ After interning, cost becomes a pure function of tree structure, independent of 
 ### Why Not Just Use Serialized Size?
 
 With content-addressable identity, we can't use serialized size for cost because:
+
 1. Different serializations of the same tree would have different costs
 2. We want `same tree hash = same cost`
 
@@ -100,7 +104,7 @@ We need a cost formula based on the **interned tree structure**.
 size_component = B×atom_bytes + A×atom_count + P×pair_count
 sha_component  = S×sha_blocks + I×sha_invocations
 
-total_cost = size_component × SIZE_COST_PER_BYTE 
+total_cost = size_component × SIZE_COST_PER_BYTE
            + sha_component × SHA_COST_PER_UNIT
 ```
 
@@ -120,10 +124,12 @@ total_cost = size_component × SIZE_COST_PER_BYTE
 The formula protects against **two distinct DoS vectors**:
 
 **1. Memory/Storage DoS**
+
 - Attack: Create structures expensive to store but cheap to hash
 - Protection: Size component charges for structural overhead
 
-**2. CPU/Hashing DoS**  
+**2. CPU/Hashing DoS**
+
 - Attack: Create structures with many small nodes (cheap in bytes, expensive to hash)
 - Protection: SHA component charges for hashing work
 
@@ -133,10 +139,10 @@ By splitting ~50/50, neither attack vector can exploit the other's blind spot.
 
 SHA256 has significant per-invocation overhead beyond the per-block mixing cost:
 
-| Hardware | Per Block | Per Invocation | Ratio |
-|----------|-----------|----------------|-------|
-| Apple M4 | 19 ns | 151 ns | 7.9× |
-| Intel 2012 | 520 ns | 3,465 ns | 6.7× |
+| Hardware   | Per Block | Per Invocation | Ratio |
+| ---------- | --------- | -------------- | ----- |
+| Apple M4   | 19 ns     | 151 ns         | 7.9×  |
+| Intel 2012 | 520 ns    | 3,465 ns       | 6.7×  |
 
 A tree with 1000 tiny atoms incurs 1000 invocations regardless of total bytes. Without the `I=8` coefficient, such structures would be severely undercharged.
 
@@ -146,13 +152,13 @@ A tree with 1000 tiny atoms incurs 1000 invocations regardless of total bytes. W
 
 ### Adversarial Structures Tested
 
-| Structure | Description | DoS Vector |
-|-----------|-------------|------------|
-| `million_nil_atoms` | Many zero-byte atoms | High invocation count |
-| `deep_nesting` | Deeply nested pairs | High pair count |
-| `single_huge_atom` | One ~100KB atom | Large data payload |
-| `many_small_pairs` | Many independent pairs | High pair count |
-| `hash_sized_atoms` | Many 32-byte atoms | Typical puzzle data |
+| Structure           | Description            | DoS Vector            |
+| ------------------- | ---------------------- | --------------------- |
+| `million_nil_atoms` | Many zero-byte atoms   | High invocation count |
+| `deep_nesting`      | Deeply nested pairs    | High pair count       |
+| `single_huge_atom`  | One ~100KB atom        | Large data payload    |
+| `many_small_pairs`  | Many independent pairs | High pair count       |
+| `hash_sized_atoms`  | Many 32-byte atoms     | Typical puzzle data   |
 
 ### Results: New vs Old Cost
 
@@ -169,14 +175,14 @@ Ratio < 1.0 means new formula charges LESS
   ✓ million_nil_atoms: 2.37x
 ```
 
-**Key finding**: All adversarial structures (many small nodes, deep nesting) cost **2x+ more** than before. The structures that cost less are large-data payloads, which have the *lowest* work-per-cost ratio and are not DoS vectors.
+**Key finding**: All adversarial structures (many small nodes, deep nesting) cost **2x+ more** than before. The structures that cost less are large-data payloads, which have the _lowest_ work-per-cost ratio and are not DoS vectors.
 
 ### Cross-Hardware Validation
 
-| Hardware | Per Block | Per Invocation | I/S Ratio |
-|----------|-----------|----------------|-----------|
-| **Apple M4** (2024) | 19 ns | 151 ns | 7.9× |
-| **Intel 2012** (no SHA-NI) | 520 ns | 3,465 ns | 6.7× |
+| Hardware                   | Per Block | Per Invocation | I/S Ratio |
+| -------------------------- | --------- | -------------- | --------- |
+| **Apple M4** (2024)        | 19 ns     | 151 ns         | 7.9×      |
+| **Intel 2012** (no SHA-NI) | 520 ns    | 3,465 ns       | 6.7×      |
 
 The I/S ratio is consistent (6.7-7.9×) across hardware. Using `I=8` is conservative on all tested platforms.
 
@@ -184,13 +190,14 @@ The I/S ratio is consistent (6.7-7.9×) across hardware. Using `I=8` is conserva
 
 For maximum-cost adversarial generators:
 
-| Hardware | Size-Only Formula | Blended Formula | Protection |
-|----------|-------------------|-----------------|------------|
-| **Apple M4** | 174 ms | 37 ms | 4.7× |
-| **Raspberry Pi 5** (est.) | ~700 ms | ~150 ms | 4.7× |
-| **Intel 2012** (unsupported) | 4.1 sec | 870 ms | 4.7× |
+| Hardware                     | Size-Only Formula | Blended Formula | Protection |
+| ---------------------------- | ----------------- | --------------- | ---------- |
+| **Apple M4**                 | 174 ms            | 37 ms           | 4.7×       |
+| **Raspberry Pi 5** (est.)    | ~700 ms           | ~150 ms         | 4.7×       |
+| **Intel 2012** (unsupported) | 4.1 sec           | 870 ms          | 4.7×       |
 
-**Conclusion**: 
+**Conclusion**:
+
 - Supported hardware: <200 ms worst case ✅
 - Unsupported legacy: <1 sec best-effort ✅
 - Consistent 4.7× protection improvement ✅
@@ -215,15 +222,16 @@ For maximum-cost adversarial generators:
 **Data**: Synthetic generators built from real mainnet spends (excluding NFT JPEGs)
 
 **Goal**: Find multipliers such that:
+
 - Total cost ≈ old cost for typical generators (backward compatible)
 - ~50% from size component, ~50% from SHA component
 
 **Results**:
 
-| Generator | Blended Cost | Old Cost | Ratio | Split |
-|-----------|--------------|----------|-------|-------|
-| synthetic_1M | 2,821M | 2,936M | 96% | 45/55 |
-| synthetic_500K | 1,592M | 1,503M | 106% | 44/56 |
+| Generator      | Blended Cost | Old Cost | Ratio | Split |
+| -------------- | ------------ | -------- | ----- | ----- |
+| synthetic_1M   | 2,821M       | 2,936M   | 96%   | 45/55 |
+| synthetic_500K | 1,592M       | 1,503M   | 106%  | 44/56 |
 
 ---
 
@@ -233,18 +241,19 @@ For maximum-cost adversarial generators:
 
 A consequence of the blended formula is that **large single atoms cost less** than under the old formula:
 
-| Formula | Cost for N-byte atom | Max atom at 11B limit |
-|---------|---------------------|----------------------|
-| **Old** | `N × 12000` | ~895 KB |
-| **New** | `(N+2) × 6000 + (N/64+9) × 4500` ≈ `6070N` | **~1.81 MB** |
+| Formula | Cost for N-byte atom                       | Max atom at 11B limit |
+| ------- | ------------------------------------------ | --------------------- |
+| **Old** | `N × 12000`                                | ~895 KB               |
+| **New** | `(N+2) × 6000 + (N/64+9) × 4500` ≈ `6070N` | **~1.81 MB**          |
 
 The new formula allows single atoms **~2× larger** for the same cost because:
+
 1. `SIZE_COST_PER_BYTE = 6000` (half of old 12000)
 2. SHA overhead for large atoms is minimal (one invocation, blocks proportional to size)
 
 ### Why This Happens
 
-Large atoms are the *safest* structure from a DoS perspective - they have the lowest work-per-cost ratio. The old formula was effectively *overcharging* for large data payloads.
+Large atoms are the _safest_ structure from a DoS perspective - they have the lowest work-per-cost ratio. The old formula was effectively _overcharging_ for large data payloads.
 
 The blended formula shifts cost toward structures with high node counts (where SHA invocation overhead matters), not raw byte volume.
 
@@ -253,6 +262,7 @@ The blended formula shifts cost toward structures with high node counts (where S
 ⚠️ **This could enable cheaper on-chain storage.**
 
 A farmer could create a spend with a large atom in a "garbage" solution containing incompressible data:
+
 - Old formula: ~895 KB max per block at cost limit
 - New formula: ~1.81 MB max per block at cost limit
 
@@ -278,11 +288,11 @@ This is a **known trade-off**, not an oversight:
 
 ### What's Changing
 
-| Aspect | Before | After |
-|--------|--------|-------|
-| **Identity** | `SHA256(serialized_bytes)` | `SHA256_tree_hash(tree)` |
-| **Cost basis** | Serialized length | Interned tree structure |
-| **Consensus coupling** | Tied to serialization | Independent of serialization |
+| Aspect                 | Before                     | After                        |
+| ---------------------- | -------------------------- | ---------------------------- |
+| **Identity**           | `SHA256(serialized_bytes)` | `SHA256_tree_hash(tree)`     |
+| **Cost basis**         | Serialized length          | Interned tree structure      |
+| **Consensus coupling** | Tied to serialization      | Independent of serialization |
 
 ### Why It's Safe
 

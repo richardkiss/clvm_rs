@@ -246,6 +246,7 @@ pub fn intern_node(allocator: &Allocator, node: NodePtr) -> Result<(Allocator, N
 /// **Deprecated**: Use `intern()` instead. Visit counts are no longer needed
 /// for cost calculation - use `InternedTree::stats()` instead.
 #[deprecated(since = "2.0.0", note = "Use intern() instead")]
+#[allow(clippy::type_complexity)]
 pub fn create_interned_node(
     allocator: &Allocator,
     node: NodePtr,
