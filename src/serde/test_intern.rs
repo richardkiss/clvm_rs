@@ -15,7 +15,7 @@ fn treehash_for_node(allocator: &Allocator, node: NodePtr) -> Bytes32 {
 
 /// Helper to convert hex string to bytes
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
-    let hex_clean = hex.trim().replace(' ', "").replace('\n', "");
+    let hex_clean = hex.trim().replace([' ', '\n'], "");
     hex_clean
         .chars()
         .collect::<Vec<_>>()

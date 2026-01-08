@@ -96,6 +96,7 @@ fn main() {
     println!("Scale factor: {}", args.scale);
     println!();
 
+    #[allow(clippy::type_complexity)]
     let tests: Vec<(&str, fn(&mut Allocator, usize) -> NodePtr)> = vec![
         ("million_nil_atoms", build_many_nil_atoms),
         ("million_tiny_atoms", build_many_tiny_atoms),
