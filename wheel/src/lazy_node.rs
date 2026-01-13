@@ -1,8 +1,4 @@
-// pyo3 macros generate code with redundant Into::into() calls on PyErr
-#![allow(clippy::useless_conversion)]
-
 use clvmr::allocator::{Allocator, NodePtr, SExp};
-use clvmr::serde::serialize_2026;
 use std::rc::Rc;
 
 use pyo3::prelude::*;
@@ -45,21 +41,6 @@ impl LazyNode {
             }
             _ => None,
         }
-    }
-
-    /// Serialize this node using the 2026 serialization format.
-    ///
-    /// This method:
-    /// 1. Interns the node to deduplicate atoms and pairs
-    /// 2. Renumbers atoms and pairs for optimal compression
-    /// 3. Serializes using the 2026 format with varints
-    ///
-    /// Returns:
-    ///     bytes: The serialized representation
-    pub fn serialize_2026(&self, py: Python) -> PyResult<PyObject> {
-        let serialized = serialize_2026(&self.allocator, self.node)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        Ok(PyBytes::new_bound(py, &serialized).into())
     }
 }
 

@@ -4,11 +4,7 @@ from typing import Iterator, List, Tuple, Optional, BinaryIO
 from .at import at
 from .casts import CastableType, to_clvm_object, int_from_bytes, int_to_bytes
 from .chia_dialect import CHIA_DIALECT
-from .clvm_rs import (
-    run_serialized_chia_program,
-    serialize_to_2026,
-    deserialize_from_2026,
-)
+from .clvm_rs import run_serialized_chia_program
 from .clvm_storage import CLVMStorage
 from .clvm_tree import CLVMTree
 from .curry_and_treehash import CurryTreehasher
@@ -16,6 +12,7 @@ from .eval_error import EvalError
 from .replace import replace
 from .ser import sexp_from_stream, sexp_to_stream, sexp_to_bytes
 from .tree_hash import sha256_treehash
+
 
 
 class Program(CLVMStorage):
@@ -58,35 +55,6 @@ class Program(CLVMStorage):
     @classmethod
     def fromhex(cls, hexstr: str) -> Program:
         return cls.from_bytes(bytes.fromhex(hexstr))
-
-    # 2026 serialization format
-
-    def to_bytes_2026(self) -> bytes:
-        """
-        Serialize to 2026 format.
-
-        The 2026 format is more compact than standard serialization because it:
-        - Deduplicates repeated atoms and pairs
-        - Uses variable-length integer encoding
-        - Optimizes for frequently-used subtrees
-        """
-        # Convert to standard bytes first, then to 2026 format
-        standard_bytes = bytes(self)
-        return serialize_to_2026(standard_bytes)
-
-    @classmethod
-    def from_bytes_2026(cls, blob: bytes) -> Program:
-        """
-        Deserialize from 2026 format.
-
-        Args:
-            blob: Bytes in 2026 serialization format
-
-        Returns:
-            Program: The deserialized program
-        """
-        lazy_node = deserialize_from_2026(blob)
-        return cls.wrap(lazy_node)
 
     def __bytes__(self) -> bytes:
         if self._cached_serialization is None:

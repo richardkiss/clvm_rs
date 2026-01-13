@@ -307,7 +307,6 @@ name = "clvm-rs-test-tools"
 version = "0.16.2"
 dependencies = [
  "chia-bls",
- "chia-sha2 0.34.0",
  "clap",
  "clvmr",
  "hex",

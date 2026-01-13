@@ -9,15 +9,11 @@ use clvmr::cost::Cost;
 use clvmr::error::EvalErr;
 use clvmr::reduction::Response;
 use clvmr::run_program::run_program;
-use clvmr::serde::{
-    deserialize_2026, node_from_bytes, node_from_bytes_backrefs, parse_triples, serialize_2026,
-    serialized_length_from_bytes, ParsedTriple,
-};
+use clvmr::serde::{node_from_bytes, parse_triples, serialized_length_from_bytes, ParsedTriple};
 use clvmr::{LIMIT_HEAP, MEMPOOL_MODE, NO_UNKNOWN_OPS};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyTuple};
 use pyo3::wrap_pyfunction;
-use std::rc::Rc;
 
 fn eval_to_py(err: EvalErr) -> PyErr {
     // Rarely Used in python bindings.
@@ -86,34 +82,11 @@ fn deserialize_as_tree(
     Ok((r, s))
 }
 
-#[pyfunction]
-fn deserialize_from_2026(_py: Python, blob: &[u8]) -> PyResult<LazyNode> {
-    let mut allocator = Allocator::new();
-    let node = deserialize_2026(&mut allocator, blob).map_err(eval_to_py)?;
-    Ok(LazyNode::new(Rc::new(allocator), node))
-}
-
-/// Convert CLVM serialization to 2026 format.
-/// Takes CLVM bytes (standard or backref format) and returns 2026 serialized bytes.
-#[pyfunction]
-fn serialize_to_2026(py: Python, blob: &[u8]) -> PyResult<PyObject> {
-    let mut allocator = Allocator::new();
-    // Try backref format first (handles both standard and backref-compressed),
-    // fall back to standard format if that fails
-    let node = node_from_bytes_backrefs(&mut allocator, blob)
-        .or_else(|_| node_from_bytes(&mut allocator, blob))
-        .map_err(eval_to_py)?;
-    let serialized = serialize_2026(&allocator, node).map_err(eval_to_py)?;
-    Ok(PyBytes::new_bound(py, &serialized).into())
-}
-
 #[pymodule]
 fn clvm_rs(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_serialized_chia_program, m)?)?;
     m.add_function(wrap_pyfunction!(serialized_length, m)?)?;
     m.add_function(wrap_pyfunction!(deserialize_as_tree, m)?)?;
-    m.add_function(wrap_pyfunction!(deserialize_from_2026, m)?)?;
-    m.add_function(wrap_pyfunction!(serialize_to_2026, m)?)?;
 
     m.add("NO_UNKNOWN_OPS", NO_UNKNOWN_OPS)?;
     m.add("LIMIT_HEAP", LIMIT_HEAP)?;
