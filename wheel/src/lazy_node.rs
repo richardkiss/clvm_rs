@@ -51,4 +51,12 @@ impl LazyNode {
             node: n,
         }
     }
+
+    pub fn allocator(&self) -> &Rc<Allocator> {
+        &self.allocator
+    }
+
+    pub fn node(&self) -> NodePtr {
+        self.node
+    }
 }

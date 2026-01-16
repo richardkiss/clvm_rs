@@ -9,11 +9,15 @@ use clvmr::cost::Cost;
 use clvmr::error::EvalErr;
 use clvmr::reduction::Response;
 use clvmr::run_program::run_program;
-use clvmr::serde::{node_from_bytes, parse_triples, serialized_length_from_bytes, ParsedTriple};
+use clvmr::serde::{
+    node_from_bytes, node_from_bytes_backrefs, node_to_bytes_backrefs, parse_triples,
+    serialized_length_from_bytes, ParsedTriple,
+};
 use clvmr::{LIMIT_HEAP, MEMPOOL_MODE, NO_UNKNOWN_OPS};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyTuple};
 use pyo3::wrap_pyfunction;
+use std::rc::Rc;
 
 fn eval_to_py(err: EvalErr) -> PyErr {
     // Rarely Used in python bindings.
@@ -82,11 +86,26 @@ fn deserialize_as_tree(
     Ok((r, s))
 }
 
+#[pyfunction]
+pub fn deserialize_with_backrefs(blob: &[u8]) -> PyResult<LazyNode> {
+    let mut allocator = Allocator::new();
+    let node = node_from_bytes_backrefs(&mut allocator, blob).map_err(eval_to_py)?;
+    Ok(LazyNode::new(Rc::new(allocator), node))
+}
+
+#[pyfunction]
+pub fn serialize_with_backrefs(py: Python, lazy_node: &LazyNode) -> PyResult<PyObject> {
+    let vec = node_to_bytes_backrefs(lazy_node.allocator(), lazy_node.node()).map_err(eval_to_py)?;
+    Ok(PyBytes::new_bound(py, &vec).into())
+}
+
 #[pymodule]
 fn clvm_rs(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_serialized_chia_program, m)?)?;
     m.add_function(wrap_pyfunction!(serialized_length, m)?)?;
     m.add_function(wrap_pyfunction!(deserialize_as_tree, m)?)?;
+    m.add_function(wrap_pyfunction!(deserialize_with_backrefs, m)?)?;
+    m.add_function(wrap_pyfunction!(serialize_with_backrefs, m)?)?;
 
     m.add("NO_UNKNOWN_OPS", NO_UNKNOWN_OPS)?;
     m.add("LIMIT_HEAP", LIMIT_HEAP)?;
