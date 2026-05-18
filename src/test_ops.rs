@@ -1,8 +1,8 @@
 use crate::allocator::{Allocator, NodePtr, SExp};
 use crate::bls_ops::{
-    op_bls_g1_multiply, op_bls_g1_negate, op_bls_g1_negate_strict, op_bls_g1_subtract,
-    op_bls_g2_add, op_bls_g2_multiply, op_bls_g2_negate, op_bls_g2_negate_strict,
-    op_bls_g2_subtract, op_bls_map_to_g1, op_bls_map_to_g2, op_bls_pairing_identity, op_bls_verify,
+    op_bls_g1_multiply, op_bls_g1_negate, op_bls_g1_subtract, op_bls_g2_add, op_bls_g2_multiply,
+    op_bls_g2_negate, op_bls_g2_subtract, op_bls_map_to_g1, op_bls_map_to_g2,
+    op_bls_pairing_identity, op_bls_verify,
 };
 use crate::core_ops::{op_cons, op_eq, op_first, op_if, op_listp, op_raise, op_rest};
 use crate::cost::Cost;
@@ -208,9 +208,10 @@ pub fn node_eq(allocator: &Allocator, s1: NodePtr, s2: NodePtr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chia_dialect::ClvmFlags;
 
     #[cfg(feature = "pre-eval")]
-    use crate::chia_dialect::{ChiaDialect, ClvmFlags};
+    use crate::chia_dialect::ChiaDialect;
 
     #[cfg(feature = "pre-eval")]
     use crate::run_program::run_program_with_pre_eval;
@@ -228,17 +229,35 @@ mod tests {
 
     use rstest::rstest;
 
-    type Opf = fn(&mut Allocator, NodePtr, Cost) -> Response;
+    type Opf = fn(&mut Allocator, NodePtr, Cost, ClvmFlags) -> Response;
+
+    fn op_bls_g1_negate_relaxed(
+        a: &mut Allocator,
+        input: NodePtr,
+        max_cost: Cost,
+        flags: ClvmFlags,
+    ) -> Response {
+        op_bls_g1_negate(a, input, max_cost, flags | ClvmFlags::RELAXED_BLS)
+    }
+
+    fn op_bls_g2_negate_relaxed(
+        a: &mut Allocator,
+        input: NodePtr,
+        max_cost: Cost,
+        flags: ClvmFlags,
+    ) -> Response {
+        op_bls_g2_negate(a, input, max_cost, flags | ClvmFlags::RELAXED_BLS)
+    }
 
     // the input is a list of test cases, each item is a tuple of:
     // (function pointer to test, list of arguments, optional result)
     // if the result is None, the call is expected to fail
-    fn run_op_test(op: &Opf, args_str: &str, expected: &str, expected_cost: u64) {
+    fn run_op_test(op: &Opf, args_str: &str, expected: &str, expected_cost: u64, flags: ClvmFlags) {
         let mut a = Allocator::new();
 
         let (args, rest) = parse_list(&mut a, args_str);
         assert_eq!(rest, "");
-        let result = op(&mut a, args, 10000000000 as Cost);
+        let result = op(&mut a, args, 10000000000 as Cost, flags);
         match result {
             Err(e) => {
                 println!("Error: {e}");
@@ -254,28 +273,35 @@ mod tests {
     }
 
     #[rstest]
-    #[case("test-core-ops")]
-    #[case("test-more-ops")]
-    #[case("test-bls-ops")]
-    #[case("test-blspy-g1")]
-    #[case("test-blspy-g2")]
-    #[case("test-blspy-hash")]
-    #[case("test-blspy-pairing")]
-    #[case("test-blspy-verify")]
-    #[case("test-bls-zk")]
-    #[case("test-secp-verify")]
-    #[case("test-secp256k1")]
-    #[case("test-secp256r1")]
-    #[case("test-modpow")]
-    #[case("test-sha256")]
-    #[case("test-sha256tree")]
-    #[case("test-sha256tree-hash")]
-    #[case("test-keccak256")]
-    #[case("test-keccak256-generated")]
-    fn test_ops(#[case] filename: &str) {
+    #[case("test-core-ops", false)]
+    #[case("test-more-ops", false)]
+    #[case("test-bls-ops", false)]
+    #[case("test-blspy-g1", false)]
+    #[case("test-blspy-g2", false)]
+    #[case("test-blspy-hash", false)]
+    #[case("test-blspy-pairing", false)]
+    #[case("test-blspy-verify", false)]
+    #[case("test-bls-zk", false)]
+    #[case("test-secp-verify", false)]
+    #[case("test-secp256k1", false)]
+    #[case("test-secp256r1", false)]
+    #[case("test-modpow", false)]
+    #[case("test-sha256", false)]
+    #[case("test-sha256tree", false)]
+    #[case("test-sha256tree-hash", false)]
+    #[case("test-keccak256", false)]
+    #[case("test-keccak256-generated", false)]
+    #[case("test-more-ops", true)]
+    #[case("test-modpow", true)]
+    fn test_ops(#[case] filename: &str, #[case] malachite: bool) {
         use std::fs::read_to_string;
 
         let filename = format!("op-tests/{filename}.txt");
+        let flags = if malachite {
+            ClvmFlags::MALACHITE
+        } else {
+            ClvmFlags::empty()
+        };
 
         let funs = HashMap::from([
             ("i", op_if as Opf),
@@ -308,18 +334,17 @@ mod tests {
             ("not", op_not as Opf),
             ("any", op_any as Opf),
             ("all", op_all as Opf),
-            //the BLS extension
             ("coinid", op_coinid as Opf),
             ("g1_add", op_point_add as Opf),
             ("g1_subtract", op_bls_g1_subtract as Opf),
             ("g1_multiply", op_bls_g1_multiply as Opf),
-            ("g1_negate", op_bls_g1_negate as Opf),
-            ("g1_negate_strict", op_bls_g1_negate_strict as Opf),
+            ("g1_negate", op_bls_g1_negate_relaxed as Opf),
+            ("g1_negate_strict", op_bls_g1_negate as Opf),
             ("g2_add", op_bls_g2_add as Opf),
             ("g2_subtract", op_bls_g2_subtract as Opf),
             ("g2_multiply", op_bls_g2_multiply as Opf),
-            ("g2_negate", op_bls_g2_negate as Opf),
-            ("g2_negate_strict", op_bls_g2_negate_strict as Opf),
+            ("g2_negate", op_bls_g2_negate_relaxed as Opf),
+            ("g2_negate_strict", op_bls_g2_negate as Opf),
             ("g1_map", op_bls_map_to_g1 as Opf),
             ("g2_map", op_bls_map_to_g2 as Opf),
             ("bls_pairing_identity", op_bls_pairing_identity as Opf),
@@ -330,7 +355,6 @@ mod tests {
             ("secp256r1_verify_65", op_secp256r1_verify as Opf),
             ("modpow", op_modpow as Opf),
             ("keccak256", op_keccak256 as Opf),
-            // 3.0 hard fork
             ("sha256tree", op_sha256_tree as Opf),
         ]);
 
@@ -362,6 +386,7 @@ mod tests {
                 args.trim(),
                 expected.trim(),
                 expected_cost.trim().parse().unwrap(),
+                flags,
             );
         }
     }
@@ -371,7 +396,7 @@ mod tests {
         let mut allocator = Allocator::new();
         let a1 = allocator.new_atom(&[65]).unwrap();
         let args = allocator.new_pair(a1, allocator.nil()).unwrap();
-        let result = op_raise(&mut allocator, args, 100000);
+        let result = op_raise(&mut allocator, args, 100000, ClvmFlags::empty());
         assert_eq!(result.unwrap_err(), EvalErr::Raise(a1));
     }
 
@@ -386,7 +411,7 @@ mod tests {
         args = allocator.new_pair(a1, args).unwrap();
         // ((a1 a2))
         args = allocator.new_pair(args, allocator.nil()).unwrap();
-        let result = op_raise(&mut allocator, args, 100000);
+        let result = op_raise(&mut allocator, args, 100000, ClvmFlags::empty());
         assert_eq!(result.unwrap_err(), EvalErr::Raise(args));
     }
 
@@ -399,21 +424,23 @@ mod tests {
         let mut args = allocator.new_pair(a2, allocator.nil()).unwrap();
         // (a1 a2)
         args = allocator.new_pair(a1, args).unwrap();
-        let result = op_raise(&mut allocator, args, 100000);
+        let result = op_raise(&mut allocator, args, 100000, ClvmFlags::empty());
         assert_eq!(result.unwrap_err(), EvalErr::Raise(args));
     }
 
     #[cfg(feature = "pre-eval")]
     use crate::error::Result;
+    #[cfg(feature = "pre-eval")]
+    use crate::serde::node_to_bytes;
 
     #[cfg(feature = "pre-eval")]
     const COST_LIMIT: u64 = 1000000000;
 
     #[cfg(feature = "pre-eval")]
     struct EvalFTracker {
-        pub prog: NodePtr,
-        pub args: NodePtr,
-        pub outcome: Option<NodePtr>,
+        pub prog: Vec<u8>,
+        pub args: Vec<u8>,
+        pub outcome: Option<Vec<u8>>,
     }
 
     #[cfg(feature = "pre-eval")]
@@ -455,8 +482,12 @@ mod tests {
 
         let tracking = Rc::new(RefCell::new(HashMap::new()));
         let pre_eval_tracking = tracking.clone();
-        let pre_eval_f: PreEvalF = Box::new(move |_allocator, prog, args| {
+        let pre_eval_f: PreEvalF = Box::new(move |a, prog, args| {
             let tracking_key = pre_eval_tracking.borrow().len();
+            let prog = node_to_bytes(a, prog).expect("node_to_bytes prog");
+            let args = node_to_bytes(a, args).expect("node_to_bytes args");
+            let post_prog = prog.clone();
+            let post_args = args.clone();
             // Ensure lifetime of mutable borrow is contained.
             // It must end before the lifetime of the following closure.
             {
@@ -471,14 +502,16 @@ mod tests {
                 );
             }
             let post_eval_tracking = pre_eval_tracking.clone();
-            let post_eval_f: Callback = Box::new(move |_a, outcome| {
+            let post_eval_f: Callback = Box::new(move |a, outcome| {
+                let outcome_bytes =
+                    outcome.map(|node| node_to_bytes(a, node).expect("node_to_bytes outcome"));
                 let mut tracking_mutable = post_eval_tracking.borrow_mut();
                 tracking_mutable.insert(
                     tracking_key,
                     EvalFTracker {
-                        prog,
-                        args,
-                        outcome,
+                        prog: post_prog.clone(),
+                        args: post_args.clone(),
+                        outcome: outcome_bytes,
                     },
                 );
             });
@@ -487,7 +520,7 @@ mod tests {
 
         let result = run_program_with_pre_eval(
             &mut allocator,
-            &ChiaDialect::new(ClvmFlags::NO_UNKNOWN_OPS),
+            &ChiaDialect::new(ClvmFlags::NO_UNKNOWN_OPS.union(ClvmFlags::ENABLE_GC)),
             program,
             NodePtr::NIL,
             COST_LIMIT,
@@ -509,23 +542,30 @@ mod tests {
         // args consed
         let args_consed = allocator.new_pair(a99, a101).unwrap();
 
+        let serialize = |node| node_to_bytes(&allocator, node).expect("serialize expected");
         let desired_outcomes = [
-            (args, NodePtr::NIL, arg_mid),
-            (f_quoted, NodePtr::NIL, f_expr),
-            (a2, arg_mid, a99),
-            (a5, arg_mid, a101),
-            (cons_expr, arg_mid, args_consed),
-            (f_expr, arg_mid, a99),
-            (program, NodePtr::NIL, a99),
+            (serialize(args), serialize(NodePtr::NIL), serialize(arg_mid)),
+            (
+                serialize(f_quoted),
+                serialize(NodePtr::NIL),
+                serialize(f_expr),
+            ),
+            (serialize(a2), serialize(arg_mid), serialize(a99)),
+            (serialize(a5), serialize(arg_mid), serialize(a101)),
+            (
+                serialize(cons_expr),
+                serialize(arg_mid),
+                serialize(args_consed),
+            ),
+            (serialize(f_expr), serialize(arg_mid), serialize(a99)),
+            (serialize(program), serialize(NodePtr::NIL), serialize(a99)),
         ];
 
         let mut found_outcomes = HashSet::new();
         let tracking_examine = tracking.borrow();
         for (_, v) in tracking_examine.iter() {
             let found = desired_outcomes.iter().position(|(p, a, o)| {
-                node_eq(&allocator, *p, v.prog)
-                    && node_eq(&allocator, *a, v.args)
-                    && node_eq(&allocator, v.outcome.unwrap(), *o)
+                *p == v.prog && *a == v.args && v.outcome.as_ref() == Some(o)
             });
             found_outcomes.insert(found);
             assert!(found.is_some());

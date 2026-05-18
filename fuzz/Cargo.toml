@@ -1,6 +1,6 @@
 [package]
 name = "clvm_rs-fuzz"
-version = "0.17.1"
+version = "0.17.7"
 authors = ["Arvid Norberg <arvid@chia.net>"]
 publish = false
 edition = "2024"
@@ -20,6 +20,12 @@ num-traits = { workspace = true }
 [[bin]]
 name = "run-program"
 path = "fuzz_targets/run_program.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "garbage-collection"
+path = "fuzz_targets/garbage_collection.rs"
 test = false
 doc = false
 
@@ -140,5 +146,23 @@ doc = false
 [[bin]]
 name = "modpow"
 path = "fuzz_targets/modpow.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "serde-2026"
+path = "fuzz_targets/serde_2026.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "serde-2026-varint"
+path = "fuzz_targets/serde_2026_varint.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "serde-2026-panic"
+path = "fuzz_targets/serde_2026_panic.rs"
 test = false
 doc = false
