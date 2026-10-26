@@ -172,3 +172,9 @@ name = "serde-2026-panic"
 path = "fuzz_targets/serde_2026_panic.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "serde-2026-normalize"
+path = "fuzz_targets/serde_2026_normalize.rs"
+test = false
+doc = false

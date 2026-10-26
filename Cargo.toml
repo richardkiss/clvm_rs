@@ -132,3 +132,7 @@ harness = false
 [[bench]]
 name = "serialize_2026"
 harness = false
+
+[[bench]]
+name = "normalize_2026"
+harness = false

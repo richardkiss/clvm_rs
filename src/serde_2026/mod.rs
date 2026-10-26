@@ -21,10 +21,13 @@
 //! that helps compression.
 
 mod de;
+mod normalize;
 mod ser;
 mod strategy;
 mod varint;
 
+#[cfg(test)]
+mod normalize_tests;
 #[cfg(test)]
 mod tests;
 
@@ -54,6 +57,7 @@ pub use de::{
     deserialize_2026, deserialize_2026_body_from_stream, deserialize_2026_from_stream,
     serialized_length_serde_2026,
 };
+pub use normalize::normalize_varints;
 pub use ser::{serialize_2026, serialize_2026_body_to_stream, serialize_2026_to_stream};
 #[doc(hidden)]
 pub use varint::{read_varint, write_varint};
