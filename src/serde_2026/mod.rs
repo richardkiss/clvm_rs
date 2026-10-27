@@ -57,7 +57,7 @@ pub use de::{
     deserialize_2026, deserialize_2026_body_from_stream, deserialize_2026_from_stream,
     serialized_length_serde_2026,
 };
-pub use normalize::normalize_varints;
+pub use normalize::{normalize_varints, normalize_varints_in_place};
 pub use ser::{serialize_2026, serialize_2026_body_to_stream, serialize_2026_to_stream};
 #[doc(hidden)]
 pub use varint::{read_varint, write_varint};

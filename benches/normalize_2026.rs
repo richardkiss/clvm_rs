@@ -1,7 +1,12 @@
 use clvmr::allocator::Allocator;
 use clvmr::serde::{ObjectCache, node_from_bytes_backrefs, treehash};
-use clvmr::serde_2026::{deserialize_2026, normalize_varints, serialize_2026};
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use clvmr::serde_2026::{
+    SERDE_2026_MAGIC_PREFIX, deserialize_2026, normalize_varints, normalize_varints_in_place,
+    read_varint, serialize_2026,
+};
+use criterion::{
+    BatchSize, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
+};
 use std::include_bytes;
 
 const BENCH_MAX_ATOM_LEN: usize = 1 << 20;
@@ -48,6 +53,28 @@ fn normalize_2026_benchmark(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("normalize", name), &blob, |b, blob| {
             b.iter(|| black_box(normalize_varints(blob).expect("normalize")))
+        });
+
+        // The blob is already minimal, so the same buffer is reused.
+        let mut buf = blob.clone();
+        group.bench_function(BenchmarkId::new("in_place", name), |b| {
+            b.iter(|| normalize_varints_in_place(black_box(&mut buf)).expect("normalize"))
+        });
+
+        // An 8-byte group count shifts every following byte left.
+        let mut body = &blob[SERDE_2026_MAGIC_PREFIX.len()..];
+        let group_count = read_varint(&mut body, false).unwrap();
+        let mut padded = SERDE_2026_MAGIC_PREFIX.to_vec();
+        padded.push(0xfe);
+        padded.extend_from_slice(&group_count.to_be_bytes()[1..]);
+        padded.extend_from_slice(body);
+        assert_eq!(normalize_varints(&padded).unwrap(), blob);
+        group.bench_function(BenchmarkId::new("in_place_shifted", name), |b| {
+            b.iter_batched_ref(
+                || padded.clone(),
+                |buf| normalize_varints_in_place(buf).expect("normalize"),
+                BatchSize::LargeInput,
+            )
         });
 
         group.bench_with_input(BenchmarkId::new("deserialize", name), &blob, |b, blob| {
